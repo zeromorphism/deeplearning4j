@@ -1,18 +1,37 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.models.word2vec.iterator;
 
-import org.deeplearning4j.datasets.iterator.DataSetIterator;
-import org.deeplearning4j.datasets.iterator.DataSetPreProcessor;
-import org.nd4j.linalg.api.ndarray.INDArray;
-import org.nd4j.linalg.dataset.DataSet;
-import org.nd4j.linalg.factory.Nd4j;
-import org.nd4j.linalg.util.FeatureUtil;
+import lombok.Getter;
 import org.deeplearning4j.models.word2vec.Word2Vec;
 import org.deeplearning4j.text.inputsanitation.InputHomogenization;
-import org.deeplearning4j.text.sentenceiterator.SentencePreProcessor;
-import org.deeplearning4j.text.sentenceiterator.labelaware.LabelAwareSentenceIterator;
 import org.deeplearning4j.text.movingwindow.Window;
 import org.deeplearning4j.text.movingwindow.WindowConverter;
 import org.deeplearning4j.text.movingwindow.Windows;
+import org.deeplearning4j.text.sentenceiterator.SentencePreProcessor;
+import org.deeplearning4j.text.sentenceiterator.labelaware.LabelAwareSentenceIterator;
+import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.dataset.DataSet;
+import org.nd4j.linalg.dataset.api.DataSetPreProcessor;
+import org.nd4j.linalg.dataset.api.iterator.DataSetIterator;
+import org.nd4j.linalg.factory.Nd4j;
+import org.nd4j.linalg.util.FeatureUtil;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,11 +48,8 @@ public class Word2VecDataSetIterator implements DataSetIterator {
     private LabelAwareSentenceIterator iter;
     private List<Window> cachedWindow;
     private List<String> labels;
-    private boolean homogenization = true;
-    private boolean addLabels = true;
-    private int batch = 10;
-    private DataSet curr;
-    private DataSetPreProcessor preProcessor;
+   private int batch = 10;
+    @Getter private DataSetPreProcessor preProcessor;
 
     /**
      * Allows for customization of all of the params of the iterator
@@ -50,8 +66,6 @@ public class Word2VecDataSetIterator implements DataSetIterator {
         this.labels = labels;
         this.batch = batch;
         cachedWindow = new CopyOnWriteArrayList<>();
-        this.addLabels = addLabels;
-        this.homogenization = homogenization;
 
         if(addLabels && homogenization)
             iter.setPreProcessor(new SentencePreProcessor() {
@@ -165,6 +179,8 @@ public class Word2VecDataSetIterator implements DataSetIterator {
         if(windows.isEmpty())
             return null;
 
+
+
         INDArray inputs = Nd4j.create(num, inputColumns());
         for(int i = 0; i < inputs.rows(); i++) {
             inputs.putRow(i, WindowConverter.asExampleMatrix(windows.get(i),vec));
@@ -201,6 +217,11 @@ public class Word2VecDataSetIterator implements DataSetIterator {
     }
 
     @Override
+    public boolean resetSupported(){
+        return true;
+    }
+
+    @Override
     public void reset() {
         iter.reset();
         cachedWindow.clear();
@@ -221,16 +242,16 @@ public class Word2VecDataSetIterator implements DataSetIterator {
         return 0;
     }
 
-    /**
-     * Set a pre processor
-     *
-     * @param preProcessor a pre processor to set
-     */
     @Override
-    public void setPreProcessor(DataSetPreProcessor preProcessor) {
-        this.preProcessor = preProcessor;
-
+    public void setPreProcessor(org.nd4j.linalg.dataset.api.DataSetPreProcessor preProcessor) {
+        this.preProcessor = (DataSetPreProcessor) preProcessor;
     }
+
+    @Override
+    public List<String> getLabels() {
+        return null;
+    }
+
 
     /**
      * Returns {@code true} if the iteration has more elements.

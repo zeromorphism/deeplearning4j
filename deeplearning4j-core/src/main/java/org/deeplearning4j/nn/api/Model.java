@@ -1,9 +1,30 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.nn.api;
 
 import org.deeplearning4j.berkeley.Pair;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.gradient.Gradient;
+import org.deeplearning4j.optimize.api.ConvexOptimizer;
 import org.nd4j.linalg.api.ndarray.INDArray;
+
+import java.util.Map;
 
 /**
  * A Model is meant for predicting something from data.
@@ -22,21 +43,28 @@ public interface Model {
      * Perform one update  applying the gradient
      * @param gradient the gradient to apply
      */
-    void update(Gradient gradient);
+    void update(INDArray gradient, String paramType);
+
 
     /**
      * The score for the model
      * @return the score for the model
      */
-    public double score();
+    double score();
+
 
     /**
-     * Transform the data based on the model's output.
-     * This can be anything from a number to reconstructions.
-     * @param data the data to transform
-     * @return the transformed data
+     * Update the score
      */
-    INDArray transform(INDArray data);
+    void computeGradientAndScore();
+
+    /**
+     * Sets a rolling tally for the score. This is useful for mini batch learning when
+     * you are accumulating error across a dataset.
+     * @param accum the amount to accum
+     */
+    void accumulateScore(double accum);
+
 
     /**
      * Parameters of the model (if any)
@@ -51,6 +79,14 @@ public interface Model {
      */
     int numParams();
 
+
+    /**
+     * the number of parameters for the model
+     * @return the number of parameters for the model
+     *
+     */
+    int numParams(boolean backwards);
+
     /**
      * Set the parameters for this model.
      * This expects a linear ndarray which then be unpacked internally
@@ -59,6 +95,26 @@ public interface Model {
      */
     void setParams(INDArray params);
 
+    /**
+     * Set the initial parameters array as a view of the full (backprop) network parameters
+     * NOTE: this is intended to be used internally in MultiLayerNetwork and ComputationGraph, not by users.
+     * @param params a 1 x nParams row vector that is a view of the larger (MLN/CG) parameters array
+     */
+    void setParamsViewArray(INDArray params);
+
+    /**
+     * Set the gradients array as a view of the full (backprop) network parameters
+     * NOTE: this is intended to be used internally in MultiLayerNetwork and ComputationGraph, not by users.
+     * @param gradients a 1 x nParams row vector that is a view of the larger (MLN/CG) gradients array
+     */
+    void setBackpropGradientsViewArray(INDArray gradients);
+
+    /**
+     * Update learningRate using for this model.
+     * Use the learningRateScoreBasedDecay to adapt the score
+     * if the Eps termination condition is met
+     */
+    void applyLearningRateScoreDecay();
 
 
     /**
@@ -72,14 +128,14 @@ public interface Model {
      * Run one iteration
      * @param input the input to iterate on
      */
-    public void iterate(INDArray input);
+    void iterate(INDArray input);
 
 
     /**
      * Calculate a gradient
      * @return the gradient for this model
      */
-    Gradient getGradient();
+    Gradient gradient();
 
     /**
      * Get the gradient and score
@@ -91,7 +147,7 @@ public interface Model {
      * The current inputs batch size
      * @return the current inputs batch size
      */
-    public int batchSize();
+    int batchSize();
 
 
     /**
@@ -105,5 +161,61 @@ public interface Model {
      * @param conf
      */
     void setConf(NeuralNetConfiguration conf);
+
+    /**
+     * The input/feature matrix for the model
+     * @return the input/feature matrix for the model
+     */
+    INDArray input();
+
+
+    /**
+     * Validate the input
+     */
+    void validateInput();
+
+    /**
+     * Returns this models optimizer
+     * @return this models optimizer
+     */
+    ConvexOptimizer getOptimizer();
+
+    /**
+     * Get the parameter
+     * @param param the key of the parameter
+     * @return the parameter vector/matrix with that particular key
+     */
+    INDArray getParam(String param);
+
+    /**
+     * Initialize the parameters
+     */
+    void initParams();
+
+    /**
+     * The param table
+     * @return
+     */
+    Map<String,INDArray> paramTable();
+
+    /**
+     * Setter for the param table
+     * @param paramTable
+     */
+    void setParamTable(Map<String,INDArray> paramTable);
+
+
+    /**
+     * Set the parameter with a new ndarray
+     * @param key the key to se t
+     * @param val the new ndarray
+     */
+    void setParam(String key,INDArray val);
+
+    /**
+     * Clear input
+     */
+    void clear();
+
 
 }

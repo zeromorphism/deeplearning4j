@@ -1,6 +1,25 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.models.embeddings.wordvectors;
 
 import org.deeplearning4j.models.embeddings.WeightLookupTable;
+import org.deeplearning4j.models.embeddings.reader.ModelUtils;
 import org.deeplearning4j.models.word2vec.wordstore.VocabCache;
 import org.nd4j.linalg.api.ndarray.INDArray;
 
@@ -17,13 +36,20 @@ import java.util.Map;
  */
 public interface WordVectors extends Serializable {
 
+    String getUNK();
+
+    void setUNK(String newUNK);
 
     /**
      * Returns true if the model has this word in the vocab
      * @param word the word to test for
      * @return true if the model has the word in the vocab
      */
-    public boolean hasWord(String word);
+    boolean hasWord(String word);
+
+    Collection<String> wordsNearest(INDArray words, int top);
+
+    Collection<String> wordsNearestSum(INDArray words, int top);
 
     /**
      * Get the top n words most similar to the given word
@@ -31,7 +57,7 @@ public interface WordVectors extends Serializable {
      * @param n the n to get
      * @return the top n words
      */
-    public Collection<String> wordsNearestSum(String word,int n);
+    Collection<String> wordsNearestSum(String word,int n);
 
 
     /**
@@ -41,7 +67,7 @@ public interface WordVectors extends Serializable {
      * @param top the top n words
      * @return the words nearest the mean of the words
      */
-    public Collection<String> wordsNearestSum(List<String> positive,List<String> negative,int top);
+    Collection<String> wordsNearestSum(Collection<String> positive,Collection<String> negative,int top);
 
     /**
      * Accuracy based on questions which are a space separated list of strings
@@ -50,9 +76,9 @@ public interface WordVectors extends Serializable {
      * @param questions the questions to ask
      * @return the accuracy based on these questions
      */
-    public Map<String,Double> accuracy(List<String> questions);
+    Map<String,Double> accuracy(List<String> questions);
 
-    public int indexOf(String word);
+    int indexOf(String word);
 
     /**
      * Find all words with a similar characters
@@ -61,28 +87,46 @@ public interface WordVectors extends Serializable {
      * @param accuracy the accuracy: 0 to 1
      * @return the list of words that are similar in the vocab
      */
-    public List<String> similarWordsInVocabTo(String word,double accuracy);
+    List<String> similarWordsInVocabTo(String word,double accuracy);
 
     /**
      * Get the word vector for a given matrix
      * @param word the word to get the matrix for
      * @return the ndarray for this word
      */
-    public double[] getWordVector(String word);
+    double[] getWordVector(String word);
 
     /**
      * Returns the word vector divided by the norm2 of the array
      * @param word the word to get the matrix for
      * @return the looked up matrix
      */
-    public INDArray getWordVectorMatrixNormalized(String word);
+    INDArray getWordVectorMatrixNormalized(String word);
 
     /**
      * Get the word vector for a given matrix
      * @param word the word to get the matrix for
      * @return the ndarray for this word
      */
-    public INDArray getWordVectorMatrix(String word);
+    INDArray getWordVectorMatrix(String word);
+
+
+    /**
+     * This method returns 2D array, where each row represents corresponding word/label
+     *
+     * @param labels
+     * @return
+     */
+    INDArray getWordVectors(Collection<String> labels);
+
+    /**
+     * This method returns mean vector, built from words/labels passed in
+     *
+     * @param labels
+     * @return
+     */
+    INDArray getWordVectorsMean(Collection<String> labels);
+
     /**
      * Words nearest based on positive and negative words
      * @param positive the positive words
@@ -90,7 +134,7 @@ public interface WordVectors extends Serializable {
      * @param top the top n words
      * @return the words nearest the mean of the words
      */
-    public Collection<String> wordsNearest(List<String> positive,List<String> negative,int top);
+    Collection<String> wordsNearest(Collection<String> positive,Collection<String> negative,int top);
 
 
     /**
@@ -99,7 +143,7 @@ public interface WordVectors extends Serializable {
      * @param n the n to get
      * @return the top n words
      */
-    public Collection<String> wordsNearest(String word,int n);
+    Collection<String> wordsNearest(String word,int n);
 
 
 
@@ -109,11 +153,24 @@ public interface WordVectors extends Serializable {
      * @param word2 the second word
      * @return a normalized similarity (cosine similarity)
      */
-    public double similarity(String word,String word2);
+    double similarity(String word,String word2);
 
-
+    /**
+     * Vocab for the vectors
+     * @return
+     */
     VocabCache vocab();
 
+    /**
+     * Lookup table for the vectors
+     * @return
+     */
     WeightLookupTable lookupTable();
+
+    /**
+     * Specifies ModelUtils to be used to access model
+     * @param utils
+     */
+    void setModelUtils(ModelUtils utils);
 
 }

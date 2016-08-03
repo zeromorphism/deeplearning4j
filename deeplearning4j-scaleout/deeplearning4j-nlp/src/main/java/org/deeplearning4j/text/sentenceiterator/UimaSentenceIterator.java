@@ -1,10 +1,22 @@
-package org.deeplearning4j.text.sentenceiterator;
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
 
-import java.io.File;
-import java.net.URI;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+package org.deeplearning4j.text.sentenceiterator;
 
 import org.apache.uima.analysis_engine.AnalysisEngine;
 import org.apache.uima.cas.CAS;
@@ -20,6 +32,11 @@ import org.deeplearning4j.text.uima.UimaResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+
 /**
  * Iterates over and returns sentences
  * based on the passed in analysis engine
@@ -31,7 +48,7 @@ public class UimaSentenceIterator extends BaseSentenceIterator {
     protected volatile CollectionReader reader;
     protected volatile Iterator<String> sentences;
     protected String path;
-    private static Logger log = LoggerFactory.getLogger(UimaSentenceIterator.class);
+    private static final Logger log = LoggerFactory.getLogger(UimaSentenceIterator.class);
     private static AnalysisEngine defaultAnalysisEngine;
     private UimaResource resource;
 
@@ -63,6 +80,13 @@ public class UimaSentenceIterator extends BaseSentenceIterator {
             }
         }
 
+        this.resource = resource;
+    }
+
+
+    public UimaSentenceIterator(SentencePreProcessor preProcessor,CollectionReader cr,UimaResource resource) {
+        super(preProcessor);
+	this.reader = cr;
         this.resource = resource;
     }
 
@@ -179,7 +203,7 @@ public class UimaSentenceIterator extends BaseSentenceIterator {
 
 
     /**
-     * Return a a sentence segmenter
+     * Return a sentence segmenter
      * @return a sentence segmenter
      */
     public static AnalysisEngine segmenter() {

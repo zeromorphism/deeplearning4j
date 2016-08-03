@@ -1,10 +1,27 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.datasets.fetchers;
 
 import org.apache.commons.io.FileUtils;
-
-import org.nd4j.linalg.dataset.DataSet;
-import org.nd4j.linalg.indexing.NDArrayIndex;
 import org.deeplearning4j.util.SerializationUtils;
+import org.nd4j.linalg.dataset.DataSet;
+import org.nd4j.linalg.util.ArrayUtil;
 
 import java.io.File;
 import java.io.IOException;
@@ -26,7 +43,7 @@ public class CurvesDataFetcher extends BaseDataFetcher {
 
     public CurvesDataFetcher() throws IOException {
         download();
-        totalExamples= data.numExamples();
+        totalExamples = data.numExamples();
 
 
     }
@@ -75,7 +92,7 @@ public class CurvesDataFetcher extends BaseDataFetcher {
             cursor = data.numExamples();
         }
 
-        curr = data.get(NDArrayIndex.interval(cursor, cursor + numExamples).indices());
+        curr = data.get(ArrayUtil.range(cursor, cursor + numExamples));
         log.info("Fetched " + curr.numExamples());
         if(cursor + numExamples < data.numExamples())
             cursor += numExamples;

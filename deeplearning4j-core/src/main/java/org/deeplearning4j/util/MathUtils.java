@@ -1,17 +1,35 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.util;
 
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
-import java.util.Set;
 
 import org.apache.commons.math3.linear.CholeskyDecomposition;
 import org.apache.commons.math3.linear.NonSquareMatrixException;
 import org.apache.commons.math3.linear.RealMatrix;
 import org.apache.commons.math3.random.RandomGenerator;
-import org.apache.commons.math3.stat.regression.OLSMultipleLinearRegression;
+import org.apache.commons.math3.util.FastMath;
 import org.deeplearning4j.berkeley.Counter;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.Set;
 
 
 
@@ -36,7 +54,7 @@ public class MathUtils  {
      */
     public static double normalize(double val,double min,double max) {
         if(max < min)
-            throw new IllegalArgumentException("Max must be greather than min");
+            throw new IllegalArgumentException("Max must be greater than min");
 
         return (val - min) / (max - min);
     }
@@ -144,7 +162,7 @@ public class MathUtils  {
      * @return
      */
     public static double sigmoid(double x) {
-        return 1.0 / (1.0 + Math.pow(Math.E, -x));
+        return 1.0 / (1.0 + FastMath.exp(-x));
     }
 
 
@@ -188,8 +206,8 @@ public class MathUtils  {
     public static double stringSimilarity(String...strings) {
         if(strings==null)
             return 0;
-        Counter<String> counter = new Counter<String>();
-        Counter<String> counter2 = new Counter<String>();
+        Counter<String> counter = new Counter<>();
+        Counter<String> counter2 = new Counter<>();
 
         for(int i = 0; i < strings[0].length(); i++)
             counter.incrementCount(String.valueOf(strings[0].charAt(i)), 1.0);
@@ -238,7 +256,10 @@ public class MathUtils  {
      * @return log(10) (totalDocs/numTImesWordAppearedInADocument)
      */
     public static double idf(double totalDocs,double numTimesWordAppearedInADocument) {
-        return totalDocs > 0 ? Math.log10(totalDocs/numTimesWordAppearedInADocument) : 0;
+        //return totalDocs > 0 ? Math.log10(totalDocs/numTimesWordAppearedInADocument) : 0;
+        if (totalDocs == 0) return 0;
+        double idf = Math.log10(totalDocs / numTimesWordAppearedInADocument);
+        return idf;
     }
 
     /**
@@ -246,17 +267,20 @@ public class MathUtils  {
      * @param count the count of a word or character in a given string or document
      * @return 1+ log(10) count
      */
-    public static double tf(int count) {
-        return count > 0 ? 1 + Math.log10(count) : 0;
+    public static double tf(int count, int documentLength) {
+        //return count > 0 ? 1 + Math.log10(count) : 0
+        double tf = ((double) count/ documentLength);
+        return tf;
     }
     /**
      * Return td * idf
-     * @param td the term frequency (assumed calculated)
+     * @param tf the term frequency (assumed calculated)
      * @param idf inverse document frequency (assumed calculated)
      * @return td * idf
      */
-    public static double tfidf(double td,double idf) {
-        return td * idf;
+    public static double tfidf(double tf,double idf) {
+//        System.out.println("TF-IDF Value: " + (tf * idf));
+        return tf * idf;
     }
 
     private static int charForLetter(char c) {
@@ -320,7 +344,7 @@ public class MathUtils  {
         if(x.size()!=y.size())
             throw new IllegalArgumentException("Sample sizes must be the same for each data applyTransformToDestination.");
 
-        List<Double> ret = new ArrayList<Double>();
+        List<Double> ret = new ArrayList<>();
 
         for(int i=0;i<x.size();i++) {
             ret.add(x.get(i));
@@ -458,7 +482,6 @@ public class MathUtils  {
      * Used for calculating top part of simple regression for
      * beta 1
      * @param vector the x coordinates
-     * @param vector2 the y coordinates
      * @return the sum of mean differences for the input vectors
      */
     public static double sumOfMeanDifferencesOnePoint(double[] vector) {
@@ -471,12 +494,15 @@ public class MathUtils  {
         return ret;
     }//end sumOfMeanDifferences
 
+    public static double variance(double[] vector) {
+        return sumOfMeanDifferencesOnePoint(vector) / vector.length;
+    }
 
     /**
      * This returns the product of all numbers in the given array.
      * @param nums the numbers to multiply over
      * @return the product of all numbers in the array, or 0
-     * if the length is or or nums i null
+     * if the length is or nums i null
      */
     public static double times(double[] nums) {
         if(nums==null || nums.length==0) return 0;
@@ -537,7 +563,7 @@ public class MathUtils  {
     public static List<double[]> coordSplit(double[] vector) {
 
         if(vector==null) return null;
-        List<double[]> ret = new ArrayList<double[]>();
+        List<double[]> ret = new ArrayList<>();
 		/* x coordinates */
         double[] xVals = new double[vector.length/2];
 		/* y coordinates */
@@ -567,7 +593,7 @@ public class MathUtils  {
      */
     public static List<List<Double>> partitionVariable(List<Double> arr,int chunk) {
         int count=0;
-        List<List<Double>> ret = new ArrayList<List<Double>>();
+        List<List<Double>> ret = new ArrayList<>();
 
 
         while(count < arr.size()) {
@@ -600,7 +626,7 @@ public class MathUtils  {
     public static List<double[]> coordSplit(List<Double> vector) {
 
         if(vector==null) return null;
-        List<double[]> ret = new ArrayList<double[]>();
+        List<double[]> ret = new ArrayList<>();
 		/* x coordinates */
         double[] xVals = new double[vector.size()/2];
 		/* y coordinates */
@@ -709,11 +735,11 @@ public class MathUtils  {
      * @return the root means squared error for two data sets
      */
     public static double rootMeansSquaredError(double[] real,double[] predicted) {
-        double ret=1/real.length;
+        double ret= 0.0;
         for(int i=0;i<real.length;i++) {
             ret+=Math.pow((real[i]-predicted[i]), 2);
         }
-        return Math.sqrt(ret);
+        return Math.sqrt(ret / real.length);
     }//end rootMeansSquaredError
     /**
      * This returns the entropy (information gain, or uncertainty of a random variable).
@@ -721,9 +747,7 @@ public class MathUtils  {
      * @return the entropy of the given vector
      */
     public static double entropy(double[] vector) {
-        if(vector==null)
-            return 0;
-        else if(vector.length < 1)
+        if(vector==null || vector.length < 1)
             return 0;
         else {
             double ret=0;
@@ -751,7 +775,7 @@ public class MathUtils  {
      * @return an adjusted r^2 for degrees of freedom
      */
     public static double adjustedrSquared(double rSquared,int numRegressors,int numDataPoints) {
-        double divide=(numDataPoints -1)/(numDataPoints - numRegressors -1);
+        double divide = (numDataPoints - 1.0) / (numDataPoints - numRegressors - 1.0);
         double rSquaredDiff=1-rSquared;
         return 1-(rSquaredDiff *divide );
     }
@@ -902,11 +926,9 @@ public class MathUtils  {
      */
     public static /*@pure@*/ int round(double value) {
 
-        int roundedValue = value > 0
+        return value > 0
                 ? (int)(value + 0.5)
                 : -(int)(Math.abs(value) + 0.5);
-
-        return roundedValue;
     }//end round
     /**
      * This returns the permutation of n choose r.
@@ -1026,9 +1048,8 @@ public class MathUtils  {
     public static double bernoullis(double n,double k,double successProb) {
 
         double combo = MathUtils.combination(n, k);
-        double p = successProb;
         double q= 1 - successProb;
-        return combo * Math.pow(p,k) * Math.pow(q,n-k);
+        return combo * Math.pow(successProb,k) * Math.pow(q,n-k);
     }//end bernoullis
     /**
      * Tests if a is smaller than b.
@@ -1122,8 +1143,7 @@ public class MathUtils  {
                 return -1;
             }
         }
-        int i= Integer.parseInt(binary,2);
-        return i;
+        return Integer.parseInt(binary,2);
     }//end toDecimal
 
 
@@ -1134,8 +1154,8 @@ public class MathUtils  {
      * double in the vector
      */
     public  static int distanceFinderZValue(double[] vector) {
-        StringBuffer binaryBuffer =new StringBuffer();
-        List<String> binaryReps = new ArrayList<String>(vector.length);
+        StringBuilder binaryBuffer =new StringBuilder();
+        List<String> binaryReps = new ArrayList<>(vector.length);
         for(int i=0;i<vector.length;i++) {
             double d=vector[i];
             int j=(int) d;
@@ -1161,11 +1181,11 @@ public class MathUtils  {
     }//end distanceFinderZValue
 
     /**
-     * This returns the euclidean distance of two vectors
+     * This returns the distance of two vectors
      * sum(i=1,n)   (q_i - p_i)^2
      * @param p the first vector
      * @param q the second vector
-     * @return the euclidean distance between two vectors
+     * @return the distance between two vectors
      */
     public static double euclideanDistance(double[] p,double[]  q) {
 
@@ -1179,11 +1199,11 @@ public class MathUtils  {
 
     }//end euclideanDistance
     /**
-     * This returns the euclidean distance of two vectors
+     * This returns the distance of two vectors
      * sum(i=1,n)   (q_i - p_i)^2
      * @param p the first vector
      * @param q the second vector
-     * @return the euclidean distance between two vectors
+     * @return the distance between two vectors
      */
     public static double euclideanDistance(float[] p,float[]  q) {
 
@@ -1274,5 +1294,19 @@ public class MathUtils  {
 
     public static double randomDoubleBetween(double begin,double end) {
         return	begin + (Math.random() * ((end - begin)));
+    }
+
+    public static void shuffleArray(int[] array, long rngSeed) {
+        shuffleArray(array,new Random(rngSeed));
+    }
+
+    public static void shuffleArray(int[] array, Random rng ){
+        //https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#The_modern_algorithm
+        for(int i=array.length-1; i>0; i-- ){
+            int j = rng.nextInt(i+1);
+            int temp = array[j];
+            array[j] = array[i];
+            array[i] = temp;
+        }
     }
 }

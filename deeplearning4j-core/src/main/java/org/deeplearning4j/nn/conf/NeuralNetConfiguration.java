@@ -1,30 +1,46 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.nn.conf;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.module.SimpleModule;
-import org.apache.commons.math3.distribution.NormalDistribution;
-import org.apache.commons.math3.distribution.RealDistribution;
-import org.apache.commons.math3.distribution.UniformRealDistribution;
-import org.apache.commons.math3.random.MersenneTwister;
-import org.apache.commons.math3.random.RandomGenerator;
-import org.deeplearning4j.models.featuredetectors.rbm.RBM;
-import org.deeplearning4j.nn.conf.deserializers.*;
-import org.deeplearning4j.nn.conf.serializers.*;
-import org.deeplearning4j.nn.weights.WeightInit;
-import org.deeplearning4j.nn.api.LayerFactory;
+import com.fasterxml.jackson.databind.jsontype.NamedType;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.deeplearning4j.nn.api.OptimizationAlgorithm;
-import org.deeplearning4j.optimize.api.IterationListener;
-import org.deeplearning4j.optimize.api.StepFunction;
-import org.deeplearning4j.optimize.stepfunctions.GradientStepFunction;
-import org.nd4j.linalg.api.activation.ActivationFunction;
-import org.nd4j.linalg.api.activation.Activations;
-import org.nd4j.linalg.lossfunctions.LossFunctions;
+import org.deeplearning4j.nn.conf.distribution.Distribution;
+import org.deeplearning4j.nn.conf.distribution.NormalDistribution;
+import org.deeplearning4j.nn.conf.layers.Layer;
+import org.deeplearning4j.nn.conf.stepfunctions.StepFunction;
+import org.deeplearning4j.nn.params.DefaultParamInitializer;
+import org.deeplearning4j.nn.weights.WeightInit;
+import org.nd4j.linalg.factory.Nd4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.*;
+
 
 /**
  * A Serializable configuration
@@ -32,658 +48,198 @@ import java.util.*;
  *
  * @author Adam Gibson
  */
+@Data
+@NoArgsConstructor
 public class NeuralNetConfiguration implements Serializable,Cloneable {
 
-    private double sparsity = 0f;
-    private boolean useAdaGrad = true;
-    private double lr = 1e-1f;
-    protected int k = 1;
-    protected double corruptionLevel = 0.3f;
-    protected int numIterations = 1000;
-    /* momentum for learning */
-    protected double momentum = 0.5f;
-    /* L2 Regularization constant */
-    protected double l2 = 0f;
-    protected boolean useRegularization = false;
-    //momentum after n iterations
-    protected Map<Integer,Double> momentumAfter = new HashMap<>();
-    //reset adagrad historical gradient after n iterations
-    protected int resetAdaGradIterations = -1;
-    protected double dropOut = 0;
-    //use only when binary hidden neuralNets are active
-    protected boolean applySparsity = false;
-    //weight init scheme, this can either be a distribution or a applyTransformToDestination scheme
-    protected WeightInit weightInit = WeightInit.VI;
-    protected OptimizationAlgorithm optimizationAlgo = OptimizationAlgorithm.CONJUGATE_GRADIENT;
-    protected LossFunctions.LossFunction lossFunction = LossFunctions.LossFunction.RECONSTRUCTION_CROSSENTROPY;
-    protected int renderWeightsEveryNumEpochs = -1;
-    //whether to concat hidden bias or add it
-    protected  boolean concatBiases = false;
-    //whether to constrain the gradient to unit norm or not
-    protected boolean constrainGradientToUnitNorm = false;
-    /* RNG for sampling. */
-    protected long seed = 123;
-    protected transient RandomGenerator rng;
-    protected transient RealDistribution dist;
-    protected transient Collection<IterationListener> listeners;
-    protected transient StepFunction stepFunction = new GradientStepFunction();
-    protected transient LayerFactory layerFactory;
+    private static final Logger log = LoggerFactory.getLogger(NeuralNetConfiguration.class);
 
+    protected Layer layer;
+    protected double leakyreluAlpha;
+    //batch size: primarily used for conv nets. Will be reinforced if set.
+    protected boolean miniBatch = true;
+    protected int numIterations;
+    //number of line search iterations
+    protected int maxNumLineSearchIterations;
+    protected long seed;
+    protected OptimizationAlgorithm optimizationAlgo;
     //gradient keys used for ensuring order when getting and setting the gradient
-    protected List<String> gradientList = new ArrayList<>();
-    private void readObject(java.io.ObjectInputStream in)
-            throws IOException, ClassNotFoundException {
-        in.defaultReadObject();
-        rng = new MersenneTwister(seed);
-        dist = new UniformRealDistribution();
-    }
-    protected int nIn,nOut;
-    protected ActivationFunction activationFunction;
-    private RBM.VisibleUnit visibleUnit = RBM.VisibleUnit.BINARY;
-    private RBM.HiddenUnit hiddenUnit = RBM.HiddenUnit.BINARY;
-    private int[] weightShape;
-    //convolutional nets
-    private int[] filterSize = {2,2};
-
-    private int numFeatureMaps = 2;
-    private int[] featureMapSize = {2,2};
-    private int[] stride = {2,2};
-
-    private int numInFeatureMaps = 2;
-    private transient ObjectMapper mapper = mapper();
-
-    public NeuralNetConfiguration() {
-
-    }
-
-
-
-
-
-    public NeuralNetConfiguration(double sparsity,
-                                  boolean useAdaGrad,
-                                  double lr,
-                                  int k,
-                                  double corruptionLevel,
-                                  int numIterations,
-                                  double momentum,
-                                  double l2,
-                                  boolean useRegularization,
-                                  Map<Integer, Double> momentumAfter,
-                                  int resetAdaGradIterations,
-                                  double dropOut,
-                                  boolean applySparsity,
-                                  WeightInit weightInit,
-                                  OptimizationAlgorithm optimizationAlgo,
-                                  LossFunctions.LossFunction lossFunction,
-                                  int renderWeightsEveryNumEpochs,
-                                  boolean concatBiases,
-                                  boolean constrainGradientToUnitNorm,
-                                  RandomGenerator rng,
-                                  RealDistribution dist,
-                                  long seed,
-                                  int nIn,
-                                  int nOut,
-                                  ActivationFunction activationFunction,
-                                  RBM.VisibleUnit visibleUnit,
-                                  RBM.HiddenUnit hiddenUnit,
-                                  int[] weightShape,
-                                  int[] filterSize,
-                                  int numFeatureMaps,
-                                  int[] stride,
-                                  int[] featureMapSize,
-                                  int numInFeatureMaps,
-                                  Collection<IterationListener> listeners,
-                                  LayerFactory layerFactory) {
-        this.layerFactory = layerFactory;
-        this.listeners = listeners;
-        this.sparsity = sparsity;
-        this.useAdaGrad = useAdaGrad;
-        this.lr = lr;
-        this.k = k;
-        this.corruptionLevel = corruptionLevel;
-        this.numIterations = numIterations;
-        this.momentum = momentum;
-        this.l2 = l2;
-        this.useRegularization = useRegularization;
-        this.momentumAfter = momentumAfter;
-        this.resetAdaGradIterations = resetAdaGradIterations;
-        this.dropOut = dropOut;
-        this.applySparsity = applySparsity;
-        this.weightInit = weightInit;
-        this.optimizationAlgo = optimizationAlgo;
-        this.lossFunction = lossFunction;
-        this.renderWeightsEveryNumEpochs = renderWeightsEveryNumEpochs;
-        this.concatBiases = concatBiases;
-        this.constrainGradientToUnitNorm = constrainGradientToUnitNorm;
-        this.rng = rng;
-        this.dist = dist;
-        this.seed = seed;
-        this.nIn = nIn;
-        this.nOut = nOut;
-        this.activationFunction = activationFunction;
-        this.visibleUnit = visibleUnit;
-        this.hiddenUnit = hiddenUnit;
-        if(weightShape != null)
-            this.weightShape = weightShape;
-        else
-            this.weightShape = new int[]{nIn,nOut};
-        this.filterSize = filterSize;
-        this.numFeatureMaps = numFeatureMaps;
-        this.stride = stride;
-        this.featureMapSize = featureMapSize;
-        this.numInFeatureMaps = numInFeatureMaps;
-
-    }
-
-    public NeuralNetConfiguration(NeuralNetConfiguration neuralNetConfiguration) {
-        this.layerFactory = neuralNetConfiguration.layerFactory;
-        this.sparsity = neuralNetConfiguration.sparsity;
-        this.useAdaGrad = neuralNetConfiguration.useAdaGrad;
-        this.lr = neuralNetConfiguration.lr;
-        this.momentum = neuralNetConfiguration.momentum;
-        this.l2 = neuralNetConfiguration.l2;
-        this.numIterations = neuralNetConfiguration.numIterations;
-        this.k = neuralNetConfiguration.k;
-        this.corruptionLevel = neuralNetConfiguration.corruptionLevel;
-        this.visibleUnit = neuralNetConfiguration.visibleUnit;
-        this.hiddenUnit = neuralNetConfiguration.hiddenUnit;
-        this.useRegularization = neuralNetConfiguration.useRegularization;
-        this.momentumAfter = neuralNetConfiguration.momentumAfter;
-        this.resetAdaGradIterations = neuralNetConfiguration.resetAdaGradIterations;
-        this.dropOut = neuralNetConfiguration.dropOut;
-        this.applySparsity = neuralNetConfiguration.applySparsity;
-        this.weightInit = neuralNetConfiguration.weightInit;
-        this.optimizationAlgo = neuralNetConfiguration.optimizationAlgo;
-        this.lossFunction = neuralNetConfiguration.lossFunction;
-        this.renderWeightsEveryNumEpochs = neuralNetConfiguration.renderWeightsEveryNumEpochs;
-        this.concatBiases = neuralNetConfiguration.concatBiases;
-        this.constrainGradientToUnitNorm = neuralNetConfiguration.constrainGradientToUnitNorm;
-        this.rng = neuralNetConfiguration.rng;
-        this.dist = neuralNetConfiguration.dist;
-        this.seed = neuralNetConfiguration.seed;
-        this.nIn = neuralNetConfiguration.nIn;
-        this.nOut = neuralNetConfiguration.nOut;
-        this.activationFunction = neuralNetConfiguration.activationFunction;
-        this.visibleUnit = neuralNetConfiguration.visibleUnit;
-        this.weightShape = neuralNetConfiguration.weightShape;
-        this.stride = neuralNetConfiguration.stride;
-        this.numFeatureMaps = neuralNetConfiguration.numFeatureMaps;
-        this.filterSize = neuralNetConfiguration.filterSize;
-        this.featureMapSize = neuralNetConfiguration.featureMapSize;
-        if(dist == null)
-            this.dist = new NormalDistribution(rng,0,.01,NormalDistribution.DEFAULT_INVERSE_ABSOLUTE_ACCURACY);
-
-        this.hiddenUnit = neuralNetConfiguration.hiddenUnit;
-    }
-
-    public LayerFactory getLayerFactory() {
-        return layerFactory;
-    }
-
-    public void setLayerFactory(LayerFactory layerFactory) {
-        this.layerFactory = layerFactory;
-    }
-
-    public List<String> getGradientList() {
-        return gradientList;
-    }
-
-    public void setGradientList(List<String> gradientList) {
-        this.gradientList = gradientList;
-    }
-
-    public StepFunction getStepFunction() {
-        return stepFunction;
-    }
-
-    public void setStepFunction(StepFunction stepFunction) {
-        this.stepFunction = stepFunction;
-    }
-
-
-    public int getNumInFeatureMaps() {
-        return numInFeatureMaps;
-    }
-
-    public void setNumInFeatureMaps(int numInFeatureMaps) {
-        this.numInFeatureMaps = numInFeatureMaps;
-    }
-
-    public int[] getFeatureMapSize() {
-        return featureMapSize;
-    }
-
-    public void setFeatureMapSize(int[] featureMapSize) {
-        this.featureMapSize = featureMapSize;
-    }
-
-    public int[] getWeightShape() {
-        return weightShape;
-    }
-
-    public void setWeightShape(int[] weightShape) {
-        this.weightShape = weightShape;
-    }
-
-    public int getNumIterations() {
-        return numIterations;
-    }
-
-    public void setNumIterations(int numIterations) {
-        this.numIterations = numIterations;
-    }
-
-    public int getK() {
-        return k;
-    }
-
-    public void setK(int k) {
-        this.k = k;
-    }
-
-    public double getCorruptionLevel() {
-        return corruptionLevel;
-    }
-
-
-    public RBM.HiddenUnit getHiddenUnit() {
-        return hiddenUnit;
-    }
-
-    public void setHiddenUnit(RBM.HiddenUnit hiddenUnit) {
-        this.hiddenUnit = hiddenUnit;
-    }
-
-    public RBM.VisibleUnit getVisibleUnit() {
-        return visibleUnit;
-    }
-
-    public void setVisibleUnit(RBM.VisibleUnit visibleUnit) {
-        this.visibleUnit = visibleUnit;
-    }
-
-
-    public LossFunctions.LossFunction getLossFunction() {
-        return lossFunction;
-    }
-
-    public void setLossFunction(LossFunctions.LossFunction lossFunction) {
-        this.lossFunction = lossFunction;
-    }
-
-    public ActivationFunction getActivationFunction() {
-        return activationFunction;
-    }
-
-    public void setActivationFunction(ActivationFunction activationFunction) {
-        this.activationFunction = activationFunction;
-    }
-
-    public int getnIn() {
-        return nIn;
-    }
-
-    public void setnIn(int nIn) {
-        this.nIn = nIn;
-    }
-
-    public int getnOut() {
-        return nOut;
-    }
-
-    public void setnOut(int nOut) {
-        this.nOut = nOut;
-    }
-
-    public double getSparsity() {
-        return sparsity;
-    }
-
-
-    public boolean isUseAdaGrad() {
-        return useAdaGrad;
-    }
-
-    public void setUseAdaGrad(boolean useAdaGrad) {
-        this.useAdaGrad = useAdaGrad;
-    }
-
-    public double getLr() {
-        return lr;
-    }
-
-    public void setLr(double lr) {
-        this.lr = lr;
-    }
-
-    public double getMomentum() {
-        return momentum;
-    }
-
-
-    public double getL2() {
-        return l2;
-    }
-
-    public void setL2(double l2) {
-        this.l2 = l2;
-    }
-
-    public boolean isUseRegularization() {
-        return useRegularization;
-    }
-
-    public void setUseRegularization(boolean useRegularization) {
-        this.useRegularization = useRegularization;
-    }
-
-    public Map<Integer, Double> getMomentumAfter() {
-        return momentumAfter;
-    }
-
-    public void setMomentumAfter(Map<Integer, Double> momentumAfter) {
-        this.momentumAfter = momentumAfter;
-    }
-
-    public int getResetAdaGradIterations() {
-        return resetAdaGradIterations;
-    }
-
-    public void setResetAdaGradIterations(int resetAdaGradIterations) {
-        this.resetAdaGradIterations = resetAdaGradIterations;
-    }
-
-    public double getDropOut() {
-        return dropOut;
-    }
-
-
-    public boolean isApplySparsity() {
-        return applySparsity;
-    }
-
-    public void setApplySparsity(boolean applySparsity) {
-        this.applySparsity = applySparsity;
-    }
-
-    public WeightInit getWeightInit() {
-        return weightInit;
-    }
-
-    public void setWeightInit(WeightInit weightInit) {
-        this.weightInit = weightInit;
-    }
-
-    public OptimizationAlgorithm getOptimizationAlgo() {
-        return optimizationAlgo;
-    }
-
-    public void setOptimizationAlgo(OptimizationAlgorithm optimizationAlgo) {
-        this.optimizationAlgo = optimizationAlgo;
-    }
-
-    public int getRenderWeightIterations() {
-        return renderWeightsEveryNumEpochs;
-    }
-
-    public void setRenderWeightIterations(int renderWeightsEveryNumEpochs) {
-        this.renderWeightsEveryNumEpochs = renderWeightsEveryNumEpochs;
-    }
-
-    public boolean isConcatBiases() {
-        return concatBiases;
-    }
-
-    public void setConcatBiases(boolean concatBiases) {
-        this.concatBiases = concatBiases;
-    }
-
-    public boolean isConstrainGradientToUnitNorm() {
-        return constrainGradientToUnitNorm;
-    }
-
-    public void setConstrainGradientToUnitNorm(boolean constrainGradientToUnitNorm) {
-        this.constrainGradientToUnitNorm = constrainGradientToUnitNorm;
-    }
-
-    public RandomGenerator getRng() {
-        return rng;
-    }
-
-    public void setRng(RandomGenerator rng) {
-        this.rng = rng;
-    }
-
-    public long getSeed() {
-        return seed;
-    }
-
-    public void setSeed(long seed) {
-        this.seed = seed;
-    }
-
-    public RealDistribution getDist() {
-        return dist;
-    }
-
-    public void setDist(RealDistribution dist) {
-        this.dist = dist;
-    }
-
-    public int[] getFilterSize() {
-        return filterSize;
-    }
-
-    public void setFilterSize(int[] filterSize) {
-        this.filterSize = filterSize;
-    }
-
-    public int getNumFeatureMaps() {
-        return numFeatureMaps;
-    }
-
-    public void setNumFeatureMaps(int numFeatureMaps) {
-        this.numFeatureMaps = numFeatureMaps;
-    }
-
-    public int[] getStride() {
-        return stride;
-    }
-
-    public void setStride(int[] stride) {
-        this.stride = stride;
-    }
-
-
-    @Override
-    public String toString() {
-        return "NeuralNetConfiguration{" +
-                "sparsity=" + sparsity +
-                ", useAdaGrad=" + useAdaGrad +
-                ", lr=" + lr +
-                ", k=" + k +
-                ", corruptionLevel=" + corruptionLevel +
-                ", numIterations=" + numIterations +
-                ", momentum=" + momentum +
-                ", l2=" + l2 +
-                ", useRegularization=" + useRegularization +
-                ", momentumAfter=" + momentumAfter +
-                ", resetAdaGradIterations=" + resetAdaGradIterations +
-                ", dropOut=" + dropOut +
-                ", applySparsity=" + applySparsity +
-                ", weightInit=" + weightInit +
-                ", optimizationAlgo=" + optimizationAlgo +
-                ", lossFunction=" + lossFunction +
-                ", renderWeightsEveryNumEpochs=" + renderWeightsEveryNumEpochs +
-                ", concatBiases=" + concatBiases +
-                ", constrainGradientToUnitNorm=" + constrainGradientToUnitNorm +
-                ", rng=" + rng +
-                ", dist=" + dist +
-                ", seed=" + seed +
-                ", nIn=" + nIn +
-                ", nOut=" + nOut +
-                ", activationFunction=" + activationFunction +
-                ", visibleUnit=" + visibleUnit +
-                ", hiddenUnit=" + hiddenUnit +
-                ", weightShape=" + Arrays.toString(weightShape) +
-                ", filterSize=" + Arrays.toString(filterSize) +
-                ", numFeatureMaps=" + numFeatureMaps +
-                ", featureMapSize=" + Arrays.toString(featureMapSize) +
-                ", stride=" + Arrays.toString(stride) +
-                ", numInFeatureMaps=" + numInFeatureMaps +
-                '}';
-    }
-
+    protected List<String> variables = new ArrayList<>();
+    //whether to constrain the gradient to unit norm or not
+    //adadelta - weight for how much to consider previous history
+    protected StepFunction stepFunction;
+    protected boolean useRegularization = false;
+    protected boolean useDropConnect = false;
+    //minimize or maximize objective
+    protected boolean minimize = true;
+    // Graves LSTM & RNN
+    protected Map<String,Double> learningRateByParam = new HashMap<>();
+    protected Map<String,Double> l1ByParam = new HashMap<>();
+    protected Map<String,Double> l2ByParam = new HashMap<>();
+    protected LearningRatePolicy learningRatePolicy = LearningRatePolicy.None;
+    protected double lrPolicyDecayRate;
+    protected double lrPolicySteps;
+    protected double lrPolicyPower;
 
     /**
-     * Set the configuration for classification
-     * @param conf the configuration to set
-     */
-    public static void setClassifier(NeuralNetConfiguration conf) {
-        setClassifier(conf,true);
-    }
-
-    /**
-     * Set the conf for classification
-     * @param conf the configuration to set
-     * @param rows whether to use softmax rows or soft max columns
-     */
-    public static void setClassifier(NeuralNetConfiguration conf,boolean rows) {
-        conf.setActivationFunction(rows ? Activations.softMaxRows() : Activations.softmax());
-        conf.setLossFunction(LossFunctions.LossFunction.MCXENT);
-        conf.setWeightInit(WeightInit.ZERO);
-    }
-
-    /**
-     * Creates and returns a copy of this object.  The precise meaning
-     * of "copy" may depend on the class of the object. The general
-     * intent is that, for any object {@code x}, the expression:
-     * <blockquote>
-     * <pre>
-     * x.clone() != x</pre></blockquote>
-     * will be true, and that the expression:
-     * <blockquote>
-     * <pre>
-     * x.clone().getClass() == x.getClass()</pre></blockquote>
-     * will be {@code true}, but these are not absolute requirements.
-     * While it is typically the case that:
-     * <blockquote>
-     * <pre>
-     * x.clone().equals(x)</pre></blockquote>
-     * will be {@code true}, this is not an absolute requirement.
-     *
-     * By convention, the returned object should be obtained by calling
-     * {@code super.clone}.  If a class and all of its superclasses (except
-     * {@code Object}) obey this convention, it will be the case that
-     * {@code x.clone().getClass() == x.getClass()}.
-     *
-     * By convention, the object returned by this method should be independent
-     * of this object (which is being cloned).  To achieve this independence,
-     * it may be necessary to modify one or more fields of the object returned
-     * by {@code super.clone} before returning it.  Typically, this means
-     * copying any mutable objects that comprise the internal "deep structure"
-     * of the object being cloned and replacing the references to these
-     * objects with references to the copies.  If a class contains only
-     * primitive fields or references to immutable objects, then it is usually
-     * the case that no fields in the object returned by {@code super.clone}
-     * need to be modified.
-     *
-     * The method {@code clone} for class {@code Object} performs a
-     * specific cloning operation. First, if the class of this object does
-     * not implement the interface {@code Cloneable}, then a
-     * {@code CloneNotSupportedException} is thrown. Note that all arrays
-     * are considered to implement the interface {@code Cloneable} and that
-     * the return type of the {@code clone} method of an array type {@code T[]}
-     * is {@code T[]} where T is any reference or primitive type.
-     * Otherwise, this method creates a new instance of the class of this
-     * object and initializes all its fields with exactly the contents of
-     * the corresponding fields of this object, as if by assignment; the
-     * contents of the fields are not themselves cloned. Thus, this method
-     * performs a "shallow copy" of this object, not a "deep copy" operation.
-     *
-     * The class {@code Object} does not itself implement the interface
-     * {@code Cloneable}, so calling the {@code clone} method on an object
-     * whose class is {@code Object} will result in throwing an
-     * exception at run time.
-     *
-     * @return a clone of this instance.
-     * @throws CloneNotSupportedException if the object's class does not
-     *                                    support the {@code Cloneable} interface. Subclasses
-     *                                    that override the {@code clone} method can also
-     *                                    throw this exception to indicate that an instance cannot
-     *                                    be cloned.
-     * @see Cloneable
+     * Creates and returns a deep copy of the configuration.
      */
     @Override
     public NeuralNetConfiguration clone()  {
-        return new NeuralNetConfiguration(this);
+        try {
+            NeuralNetConfiguration clone = (NeuralNetConfiguration) super.clone();
+            if(clone.layer != null) clone.layer = clone.layer.clone();
+            if(clone.stepFunction != null) clone.stepFunction = clone.stepFunction.clone();
+            if(clone.variables != null ) clone.variables = new ArrayList<>(clone.variables);
+            if(clone.learningRateByParam != null ) clone.learningRateByParam = new HashMap<>(clone.learningRateByParam);
+            if(clone.l1ByParam != null ) clone.l1ByParam = new HashMap<>(clone.l1ByParam);
+            if(clone.l2ByParam != null ) clone.l2ByParam = new HashMap<>(clone.l2ByParam);
+            return clone;
+        } catch (CloneNotSupportedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public List<String> variables() {
+        return new ArrayList<>(variables);
+    }
+
+    public void addVariable(String variable) {
+        if(!variables.contains(variable)) {
+            variables.add(variable);
+            setLayerParamLR(variable);
+        }
+    }
+    
+    public void clearVariables(){
+    	variables.clear();
     }
 
 
-    /**
-     * Interface for a function to override
-     * builder configurations at a particular layer
-     *
-     */
-    public static interface  ConfOverride  {
-        void override(int i,Builder builder);
+    public void setLayerParamLR(String variable){
+        double lr = (variable.substring(0, 1).equals(DefaultParamInitializer.BIAS_KEY) && !Double.isNaN(layer.getBiasLearningRate()))? layer.getBiasLearningRate(): layer.getLearningRate();
+        double l1 = variable.substring(0, 1).equals(DefaultParamInitializer.BIAS_KEY) ? 0.0: layer.getL1();
+        double l2 = variable.substring(0, 1).equals(DefaultParamInitializer.BIAS_KEY) ? 0.0: layer.getL2();
+        learningRateByParam.put(variable, lr);
+        l1ByParam.put(variable, l1);
+        l2ByParam.put(variable, l2);
 
     }
+
+    public double getLearningRateByParam(String variable){
+        return learningRateByParam.get(variable);
+    }
+
+    public void setLearningRateByParam(String variable, double rate){
+        learningRateByParam.put(variable, rate);
+    }
+    public double getL1ByParam(String variable ){
+        return l1ByParam.get(variable);
+    }
+
+    public double getL2ByParam(String variable ){
+        return l2ByParam.get(variable);
+    }
+
 
     /**
      * Fluent interface for building a list of configurations
      */
-    public static class ListBuilder {
-        private List<Builder> layerwise;
-        private int[] hiddenLayerSizes;
-        private boolean useDropConnect = false;
-        private boolean pretrain = true;
-        public ListBuilder(List<Builder> list) {
-            this.layerwise = list;
+    public static class ListBuilder extends MultiLayerConfiguration.Builder {
+        private Map<Integer, Builder> layerwise;
+        private Builder globalConfig;
+
+        // Constructor
+        public ListBuilder(Builder globalConfig, Map<Integer, Builder> layerMap) {
+            this.globalConfig = globalConfig;
+            this.layerwise = layerMap;
         }
 
+        public ListBuilder(Builder globalConfig){
+            this(globalConfig,new HashMap<Integer, Builder>());
+        }
+
+
+        public ListBuilder backprop(boolean backprop) {
+            this.backprop = backprop;
+            return this;
+        }
 
         public ListBuilder pretrain(boolean pretrain) {
             this.pretrain = pretrain;
             return this;
         }
 
-        public ListBuilder useDropConnect(boolean useDropConnect) {
-            this.useDropConnect = useDropConnect;
+        public ListBuilder layer(int ind, Layer layer) {
+            if(layerwise.containsKey(ind)){
+                layerwise.get(ind).layer(layer);
+            } else {
+                layerwise.put(ind,globalConfig.clone().layer(layer));
+            }
             return this;
         }
 
-
-        public ListBuilder override(ConfOverride override) {
-            for(int i = 0; i < layerwise.size(); i++)
-                override.override(i,layerwise.get(i));
-            return this;
+        public Map<Integer, Builder> getLayerwise() {
+            return layerwise;
         }
 
-
-
-        public ListBuilder hiddenLayerSizes(int...hiddenLayerSizes) {
-            this.hiddenLayerSizes = hiddenLayerSizes;
-            return this;
-        }
-
+        /**
+         * Build the multi layer network
+         * based on this neural network and
+         * overr ridden parameters
+         * @return the configuration to build
+         */
         public MultiLayerConfiguration build() {
-            if(layerwise.size() != hiddenLayerSizes.length + 1)
-                throw new IllegalStateException("Number of hidden layers mut be equal to hidden layer sizes + 1");
-
             List<NeuralNetConfiguration> list = new ArrayList<>();
-            for(int i = 0; i < layerwise.size(); i++)
+            if(layerwise.isEmpty()) throw new IllegalStateException("Invalid configuration: no layers defined");
+            for(int i = 0; i < layerwise.size(); i++) {
+                if(layerwise.get(i) == null){
+                    throw new IllegalStateException("Invalid configuration: layer number " + i + " not specified. Expect layer "
+                        + "numbers to be 0 to " + (layerwise.size()-1) + " inclusive (number of layers defined: " + layerwise.size() + ")");
+                }
+                if(layerwise.get(i).getLayer() == null) throw new IllegalStateException("Cannot construct network: Layer config for" +
+                        "layer with index " + i + " is not defined)");
                 list.add(layerwise.get(i).build());
-            MultiLayerConfiguration ret = new MultiLayerConfiguration.Builder()
-                    .useDropConnect(useDropConnect).pretrain(pretrain)
-                    .hiddenLayerSizes(hiddenLayerSizes)
+            }
+            return new MultiLayerConfiguration.Builder().backprop(backprop).inputPreProcessors(inputPreProcessors).
+                    pretrain(pretrain).backpropType(backpropType).tBPTTForwardLength(tbpttFwdLength)
+                    .tBPTTBackwardLength(tbpttBackLength)
+                    .redistributeParams(redistributeParams)
+                    .cnnInputSize(cnnInputSize)
                     .confs(list).build();
-            return ret;
         }
 
     }
+    /**
+     * Return this configuration as json
+     * @return this configuration represented as json
+     */
+    public String toYaml() {
+        ObjectMapper mapper = mapperYaml();
 
+        try {
+            String ret =  mapper.writeValueAsString(this);
+            return ret;
+
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Create a neural net configuration from json
+     * @param json the neural net configuration from json
+     * @return
+     */
+    public static NeuralNetConfiguration fromYaml(String json) {
+        ObjectMapper mapper = mapperYaml();
+        try {
+            NeuralNetConfiguration ret =  mapper.readValue(json, NeuralNetConfiguration.class);
+            return ret;
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     /**
      * Return this configuration as json
@@ -694,12 +250,7 @@ public class NeuralNetConfiguration implements Serializable,Cloneable {
 
         try {
             String ret =  mapper.writeValueAsString(this);
-            return ret
-                    .replaceAll("\"activationFunction\",","")
-                    .replaceAll("\"rng\",","")
-                    .replaceAll("\"dist\",","")
-                    .replaceAll("\"layerFactory\",","")
-                    .replaceAll("\"stepFunction\",","");
+            return ret;
 
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new RuntimeException(e);
@@ -714,40 +265,29 @@ public class NeuralNetConfiguration implements Serializable,Cloneable {
     public static NeuralNetConfiguration fromJson(String json) {
         ObjectMapper mapper = mapper();
         try {
-            //serialize seed rng properly
             NeuralNetConfiguration ret =  mapper.readValue(json, NeuralNetConfiguration.class);
-            ret.rng.setSeed(ret.seed);
             return ret;
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public void setSparsity(double sparsity) {
-        this.sparsity = sparsity;
+    /**
+     * Object mapper for serialization of configurations
+     * @return
+     */
+    public static ObjectMapper mapperYaml() {
+        return mapperYaml;
     }
 
-    public void setCorruptionLevel(double corruptionLevel) {
-        this.corruptionLevel = corruptionLevel;
-    }
+    private static final ObjectMapper mapperYaml = initMapperYaml();
 
-    public void setMomentum(double momentum) {
-        this.momentum = momentum;
-    }
-
-
-    public void setDropOut(double dropOut) {
-        this.dropOut = dropOut;
-    }
-
-    public Collection<IterationListener> getListeners() {
-        if(listeners == null)
-            listeners = new ArrayList<>();
-        return listeners;
-    }
-
-    public void setListeners(Collection<IterationListener> listeners) {
-        this.listeners = listeners;
+    private static ObjectMapper initMapperYaml() {
+        ObjectMapper ret = new ObjectMapper(new YAMLFactory());
+        ret.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        ret.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+        ret.enable(SerializationFeature.INDENT_OUTPUT);
+        return ret;
     }
 
     /**
@@ -755,301 +295,299 @@ public class NeuralNetConfiguration implements Serializable,Cloneable {
      * @return
      */
     public static ObjectMapper mapper() {
+        return mapper;
+    }
+
+    /**Reinitialize and return the Jackson/json ObjectMapper with additional named types.
+     * This can be used to add additional subtypes at runtime (i.e., for JSON mapping with
+     * types defined outside of the main DL4J codebase)
+     */
+    public static ObjectMapper reinitMapperWithSubtypes(Collection<NamedType> additionalTypes){
+        mapper.registerSubtypes(additionalTypes.toArray(new NamedType[additionalTypes.size()]));
+        //Recreate the mapper (via copy), as mapper won't use registered subtypes after first use
+        mapper = mapper.copy();
+        return mapper;
+    }
+
+    private static ObjectMapper mapper = initMapper();
+
+    private static ObjectMapper initMapper() {
         ObjectMapper ret = new ObjectMapper();
         ret.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        ret.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS,false);
-        SimpleModule module = new SimpleModule();
-        module.addSerializer(LayerFactory.class,new LayerFactorySerializer());
-        module.addSerializer(StepFunction.class,new StepFunctionSerializer());
-        module.addDeserializer(ActivationFunction.class, new ActivationFunctionDeSerializer());
-        module.addSerializer(ActivationFunction.class, new ActivationFunctionSerializer());
-        module.addDeserializer(RandomGenerator.class, new RandomGeneratorDeSerializer());
-        module.addSerializer(RandomGenerator.class, new RandomGeneratorSerializer());
-        module.addSerializer(RealDistribution.class, new DistributionSerializer());
-        module.addDeserializer(StepFunction.class, new StepFunctionDeSerializer());
-        module.addDeserializer(RealDistribution.class, new DistributionDeSerializer());
-        module.addDeserializer(LayerFactory.class,new LayerFactoryDeSerializer());
-        ret.registerModule(module);
+        ret.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+        ret.configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true);
+        ret.enable(SerializationFeature.INDENT_OUTPUT);
         return ret;
     }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof NeuralNetConfiguration)) return false;
-
-        NeuralNetConfiguration that = (NeuralNetConfiguration) o;
-
-        if (applySparsity != that.applySparsity) return false;
-        if (concatBiases != that.concatBiases) return false;
-        if (constrainGradientToUnitNorm != that.constrainGradientToUnitNorm) return false;
-        if (Double.compare(that.corruptionLevel, corruptionLevel) != 0) return false;
-        if (Double.compare(that.dropOut, dropOut) != 0) return false;
-           if (k != that.k) return false;
-        if (Double.compare(that.l2, l2) != 0) return false;
-        if (Double.compare(that.lr, lr) != 0) return false;
-        if (Double.compare(that.momentum, momentum) != 0) return false;
-        if (nIn != that.nIn) return false;
-        if (nOut != that.nOut) return false;
-        if (numFeatureMaps != that.numFeatureMaps) return false;
-        if (numInFeatureMaps != that.numInFeatureMaps) return false;
-        if (numIterations != that.numIterations) return false;
-         if (renderWeightsEveryNumEpochs != that.renderWeightsEveryNumEpochs) return false;
-        if (resetAdaGradIterations != that.resetAdaGradIterations) return false;
-        if (seed != that.seed) return false;
-        if (Double.compare(that.sparsity, sparsity) != 0) return false;
-        if (useAdaGrad != that.useAdaGrad) return false;
-        if (useRegularization != that.useRegularization) return false;
-        if (activationFunction != null ? !activationFunction.equals(that.activationFunction) : that.activationFunction != null)
-            return false;
-        if (!Arrays.equals(featureMapSize, that.featureMapSize)) return false;
-        if (!Arrays.equals(filterSize, that.filterSize)) return false;
-        if (hiddenUnit != that.hiddenUnit) return false;
-        if (lossFunction != that.lossFunction) return false;
-        if (momentumAfter != null ? !momentumAfter.equals(that.momentumAfter) : that.momentumAfter != null)
-            return false;
-        if (optimizationAlgo != that.optimizationAlgo) return false;
-        if (!Arrays.equals(stride, that.stride)) return false;
-        if (visibleUnit != that.visibleUnit) return false;
-        if (weightInit != that.weightInit) return false;
-        if (!Arrays.equals(weightShape, that.weightShape)) return false;
-
-        return true;
+    public Object[] getExtraArgs() {
+        if(layer == null || layer.getActivationFunction() == null) return new Object[0];
+        switch( layer.getActivationFunction()) {
+            case "leakyrelu" :
+                return new Object[] {leakyreluAlpha};
+            case "relu" :
+                return new Object[] { 0 };
+            default:
+                return new Object [] {};
+        }
     }
 
-    @Override
-    public int hashCode() {
-        int result;
-        long temp;
-        temp = Double.doubleToLongBits(sparsity);
-        result = (int) (temp ^ (temp >>> 32));
-        result = 31 * result + (useAdaGrad ? 1 : 0);
-        temp = Double.doubleToLongBits(lr);
-        result = 31 * result + (int) (temp ^ (temp >>> 32));
-        result = 31 * result + k;
-        temp = Double.doubleToLongBits(corruptionLevel);
-        result = 31 * result + (int) (temp ^ (temp >>> 32));
-        result = 31 * result + numIterations;
-        temp = Double.doubleToLongBits(momentum);
-        result = 31 * result + (int) (temp ^ (temp >>> 32));
-        temp = Double.doubleToLongBits(l2);
-        result = 31 * result + (int) (temp ^ (temp >>> 32));
-        result = 31 * result + (int) (temp ^ (temp >>> 32));
-        result = 31 * result + (int) (temp ^ (temp >>> 32));
-        result = 31 * result + (useRegularization ? 1 : 0);
-        result = 31 * result + (momentumAfter != null ? momentumAfter.hashCode() : 0);
-        result = 31 * result + resetAdaGradIterations;
-        temp = Double.doubleToLongBits(dropOut);
-        result = 31 * result + (int) (temp ^ (temp >>> 32));
-        result = 31 * result + (applySparsity ? 1 : 0);
-        result = 31 * result + (weightInit != null ? weightInit.hashCode() : 0);
-        result = 31 * result + (optimizationAlgo != null ? optimizationAlgo.hashCode() : 0);
-        result = 31 * result + (lossFunction != null ? lossFunction.hashCode() : 0);
-        result = 31 * result + renderWeightsEveryNumEpochs;
-        result = 31 * result + (concatBiases ? 1 : 0);
-        result = 31 * result + (constrainGradientToUnitNorm ? 1 : 0);
-        result = 31 * result + (int) (seed ^ (seed >>> 32));
-        result = 31 * result + nIn;
-        result = 31 * result + nOut;
-        result = 31 * result + (activationFunction != null ? activationFunction.hashCode() : 0);
-        result = 31 * result + (visibleUnit != null ? visibleUnit.hashCode() : 0);
-        result = 31 * result + (hiddenUnit != null ? hiddenUnit.hashCode() : 0);
-        result = 31 * result + (weightShape != null ? Arrays.hashCode(weightShape) : 0);
-        result = 31 * result + (filterSize != null ? Arrays.hashCode(filterSize) : 0);
-        result = 31 * result + numFeatureMaps;
-        result = 31 * result + (featureMapSize != null ? Arrays.hashCode(featureMapSize) : 0);
-        result = 31 * result + (stride != null ? Arrays.hashCode(stride) : 0);
-        result = 31 * result + numInFeatureMaps;
-        return result;
-    }
+    @Data
+    public static class Builder implements Cloneable {
+        protected String activationFunction = "sigmoid";
+        protected WeightInit weightInit = WeightInit.XAVIER;
+        protected double biasInit = 0.0;
+        protected Distribution dist = null;
+        protected double learningRate = 1e-1;
+        protected double biasLearningRate = Double.NaN;
+        protected Map<Integer, Double> learningRateSchedule = null;
+        protected double lrScoreBasedDecay;
+        protected double l1 = Double.NaN;
+        protected double l2 = Double.NaN;
+        protected double dropOut = 0;
+        protected Updater updater = Updater.SGD;
+        protected double momentum = Double.NaN;
+        protected Map<Integer, Double> momentumSchedule = null;
+        protected double rho = Double.NaN;
+        protected double rmsDecay = Double.NaN;
+        protected double adamMeanDecay = Double.NaN;
+        protected double adamVarDecay = Double.NaN;
+        protected Layer layer;
+        protected double leakyreluAlpha = 0.01;
+        protected boolean miniBatch = true;
+        protected int numIterations = 5;
+        protected int maxNumLineSearchIterations = 5;
+        protected long seed = System.currentTimeMillis();
+        protected boolean useRegularization = false;
+        protected OptimizationAlgorithm optimizationAlgo = OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT;
+        protected StepFunction stepFunction = null;
+        protected boolean useDropConnect = false;
+        protected boolean minimize = true;
+        protected GradientNormalization gradientNormalization = GradientNormalization.None;
+        protected double gradientNormalizationThreshold = 1.0;
+        protected LearningRatePolicy learningRatePolicy = LearningRatePolicy.None;
+        protected double lrPolicyDecayRate = Double.NaN;
+        protected double lrPolicySteps = Double.NaN;
+        protected double lrPolicyPower = Double.NaN;
 
-    public static class Builder {
-        private int k = 1;
-        private double corruptionLevel = 3e-1f;
-        private double sparsity = 0f;
-        private boolean useAdaGrad = true;
-        private double lr = 1e-1f;
-        private double momentum = 0.5f;
-        private double l2 = 0f;
-        private boolean useRegularization = false;
-        private Map<Integer, Double> momentumAfter;
-        private int resetAdaGradIterations = -1;
-        private double dropOut = 0;
-        private boolean applySparsity = false;
-        private WeightInit weightInit = WeightInit.VI;
-        private OptimizationAlgorithm optimizationAlgo = OptimizationAlgorithm.CONJUGATE_GRADIENT;
-        private int renderWeightsEveryNumEpochs = -1;
-        private boolean concatBiases = false;
-        private boolean constrainGradientToUnitNorm = false;
-        private RandomGenerator rng = new MersenneTwister(123);
-        private long seed = 123;
-        private RealDistribution dist  = new NormalDistribution(rng,0,.01,NormalDistribution.DEFAULT_INVERSE_ABSOLUTE_ACCURACY);
-        private boolean adagrad = true;
-        private LossFunctions.LossFunction lossFunction = LossFunctions.LossFunction.RECONSTRUCTION_CROSSENTROPY;
-        private int nIn;
-        private int nOut;
-        private ActivationFunction activationFunction = Activations.sigmoid();
-        private RBM.VisibleUnit visibleUnit = RBM.VisibleUnit.BINARY;
-        private RBM.HiddenUnit hiddenUnit = RBM.HiddenUnit.BINARY;
-        private int numIterations = 1000;
-        private int[] weightShape;
-        private int[] filterSize;
-        private int numFeatureMaps = 2;
-        private int[] featureMapSize = {2,2};
-        private int numInFeatureMaps = 2;
-        //subsampling layers
-        private int[] stride;
-        private Collection<IterationListener> listeners;
-        private StepFunction stepFunction = new GradientStepFunction();
-        private LayerFactory layerFactory;
+        /** Process input as minibatch vs full dataset.
+         * Default set to true. */
+        public Builder miniBatch(boolean miniBatch) {
+            this.miniBatch = miniBatch;
+            return this;
+        }
 
+        /**
+         * Use drop connect: multiply the coefficients
+         * by a binomial sampling wrt the dropout probability
+         * @param useDropConnect whether to use drop connect or not
+         * @return the
+         */
+        public Builder useDropConnect(boolean useDropConnect) {
+            this.useDropConnect = useDropConnect;
+            return this;
+        }
 
-        public Builder layerFactory(LayerFactory layerFactory) {
-            this.layerFactory = layerFactory;
+        /** Objective function to minimize or maximize cost function
+         * Default set to minimize true. */
+        public Builder minimize(boolean minimize) {
+            this.minimize = minimize;
+            return this;
+        }
+
+        /** Maximum number of line search iterations.
+         * Only applies for line search optimizers: Line Search SGD, Conjugate Gradient, LBFGS
+         * is NOT applicable for standard SGD
+         * @param maxNumLineSearchIterations > 0
+         * @return
+         */
+        public Builder maxNumLineSearchIterations(int maxNumLineSearchIterations) {
+            this.maxNumLineSearchIterations = maxNumLineSearchIterations;
             return this;
         }
 
 
+
+        /** Layer class. */
+        public Builder layer(Layer layer) {
+            this.layer = layer;
+            return this;
+        }
+
+        /** Step function to apply for back track line search.
+         * Only applies for line search optimizers: Line Search SGD, Conjugate Gradient, LBFGS
+         * Options: DefaultStepFunction (default), NegativeDefaultStepFunction
+         * GradientStepFunction (for SGD), NegativeGradientStepFunction */
         public Builder stepFunction(StepFunction stepFunction) {
             this.stepFunction = stepFunction;
             return this;
         }
 
+        /** <b>Deprecated</b><br>
+         * Create a ListBuilder (for creating a MultiLayerConfiguration) with the specified number of layers, not including input.
+         * @param size number of layers in the network
+         * @deprecated Manually specifying number of layers in  is not necessary. Use {@link #list()} or {@link #list(Layer...)} methods.
+         * */
         public ListBuilder list(int size) {
-            if(size < 2)
-                throw new IllegalArgumentException("Number of layers must be > 1");
-
-            List<Builder> list = new ArrayList<>();
-            for(int i = 0; i < size; i++)
-                list.add(clone());
-            return new ListBuilder(list);
+            return list();
         }
 
-
-        public Builder clone() {
-            Builder b = new Builder().activationFunction(activationFunction).layerFactory(layerFactory)
-                    .adagradResetIterations(resetAdaGradIterations).applySparsity(applySparsity)
-                    .concatBiases(concatBiases).constrainGradientToUnitNorm(constrainGradientToUnitNorm)
-                    .dist(dist).dropOut(dropOut).featureMapSize(featureMapSize).filterSize(filterSize)
-                    .hiddenUnit(hiddenUnit).iterations(numIterations).l2(l2).learningRate(lr).useAdaGrad(adagrad).stepFunction(stepFunction)
-                    .lossFunction(lossFunction).momentumAfter(momentumAfter).momentum(momentum).listeners(listeners)
-                    .nIn(nIn).nOut(nOut).numFeatureMaps(numFeatureMaps).optimizationAlgo(optimizationAlgo)
-                    .regularization(useRegularization).render(renderWeightsEveryNumEpochs).resetAdaGradIterations(resetAdaGradIterations)
-                    .rng(rng).seed(seed).sparsity(sparsity).stride(stride).useAdaGrad(useAdaGrad).visibleUnit(visibleUnit)
-                    .weightInit(weightInit).weightShape(weightShape);
-            return b;
+        /**Create a ListBuilder (for creating a MultiLayerConfiguration)<br>
+         * Usage:<br>
+         * <pre>
+         * {@code .list()
+         * .layer(0,new DenseLayer.Builder()...build())
+         * ...
+         * .layer(n,new OutputLayer.Builder()...build())
+         * }
+         * </pre>
+         * */
+        public ListBuilder list(){
+            return new ListBuilder(this);
         }
 
-
-
-        public Builder iterationListener(IterationListener listener) {
-            if(listeners != null)
-                listeners.add(listener);
-            else {
-                listeners = new ArrayList<>();
-                listeners.add(listener);
+        /**Create a ListBuilder (for creating a MultiLayerConfiguration) with the specified layers<br>
+         * Usage:<br>
+         * <pre>
+         * {@code .list(
+         *      new DenseLayer.Builder()...build(),
+         *      ...,
+         *      new OutputLayer.Builder()...build())
+         * }
+         * </pre>
+         * @param layers The layer configurations for the network
+         */
+        public ListBuilder list(Layer... layers){
+            if(layers == null || layers.length == 0) throw new IllegalArgumentException("Cannot create network with no layers");
+            Map<Integer, Builder> layerMap = new HashMap<>();
+            for(int i = 0; i < layers.length; i++) {
+                NeuralNetConfiguration.Builder b = this.clone();
+                b.layer(layers[i]);
+                layerMap.put(i, b);
             }
+            return new ListBuilder(this,layerMap);
 
-            return this;
         }
 
-        public Builder  listeners(Collection<IterationListener> listeners) {
-            this.listeners = listeners;
-            return this;
+        public ComputationGraphConfiguration.GraphBuilder graphBuilder(){
+            return new ComputationGraphConfiguration.GraphBuilder(this);
         }
 
-
-        public Builder numInFeatureMaps(int numInFeatureMaps) {
-            this.numInFeatureMaps = numInFeatureMaps;
-            return this;
-        }
-        public Builder featureMapSize(int[] featureMapSize) {
-            this.featureMapSize = featureMapSize;
-            return this;
-        }
-
-
-        public Builder stride(int[] stride) {
-            this.stride = stride;
-            return this;
-        }
-
-
-
-        public Builder numFeatureMaps(int numFeatureMaps) {
-            this.numFeatureMaps = numFeatureMaps;
-            return this;
-        }
-
-        public Builder filterSize(int[] filterSize) {
-            if(filterSize == null)
-                return this;
-            if(filterSize == null || filterSize.length != 2)
-                throw new IllegalArgumentException("Invalid filter size must be length 2");
-            this.filterSize = filterSize;
-            return this;
-        }
-
-        public Builder weightShape(int[] weightShape) {
-            this.weightShape = weightShape;
-            return this;
-        }
-
-
-
-
-
+        /** Number of optimization iterations. */
         public Builder iterations(int numIterations) {
             this.numIterations = numIterations;
             return this;
         }
 
+        /** Random number generator seed. Used for reproducability between runs */
+        public Builder seed(int seed) {
+            this.seed = (long) seed;
+            Nd4j.getRandom().setSeed(seed);
+            return this;
+        }
 
-        public Builder dist(RealDistribution dist) {
+        /** Random number generator seed. Used for reproducability between runs */
+        public Builder seed(long seed) {
+            this.seed = seed;
+            Nd4j.getRandom().setSeed(seed);
+            return this;
+        }
+
+        public Builder optimizationAlgo(OptimizationAlgorithm optimizationAlgo) {
+            this.optimizationAlgo = optimizationAlgo;
+            return this;
+        }
+
+        /** Whether to use regularization (l1, l2, dropout, etc */
+        public Builder regularization(boolean useRegularization) {
+            this.useRegularization = useRegularization;
+            return this;
+        }
+
+        @Override
+        public Builder clone() {
+            try {
+                Builder clone = (Builder) super.clone();
+                if(clone.layer != null) clone.layer = clone.layer.clone();
+                if(clone.stepFunction != null) clone.stepFunction = clone.stepFunction.clone();
+
+                return clone;
+
+            } catch (CloneNotSupportedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        /**Activation function / neuron non-linearity
+         * Typical values include:<br>
+         * "relu" (rectified linear), "tanh", "sigmoid", "softmax",
+         * "hardtanh", "leakyrelu", "maxout", "softsign", "softplus"
+         */
+        public Builder activation(String activationFunction) {
+            this.activationFunction = activationFunction;
+            return this;
+        }
+
+        public Builder leakyreluAlpha(double leakyreluAlpha) {
+            this.leakyreluAlpha = leakyreluAlpha;
+            return this;
+        }
+
+        /** Weight initialization scheme.
+         * @see org.deeplearning4j.nn.weights.WeightInit
+         */
+        public Builder weightInit(WeightInit weightInit) {
+            this.weightInit = weightInit;
+            return this;
+            }
+
+        public Builder biasInit(double biasInit) {
+            this.biasInit = biasInit;
+            return this;
+        }
+
+        /** Distribution to sample initial weights from. Used in conjunction with
+         * .weightInit(WeightInit.DISTRIBUTION).
+         */
+        public Builder dist(Distribution dist) {
             this.dist = dist;
             return this;
         }
 
-
-        public Builder sparsity(double sparsity) {
-            this.sparsity = sparsity;
+        /** Learning rate. Defaults to 1e-1*/
+        public Builder learningRate(double learningRate) {
+            this.learningRate = learningRate;
             return this;
         }
 
-        public Builder useAdaGrad(boolean useAdaGrad) {
-            this.useAdaGrad = useAdaGrad;
+        /** Bias learning rate. Set this to apply a different learning rate to the bias*/
+        public Builder biasLearningRate(double biasLearningRate){
+            this.biasLearningRate = biasLearningRate;
             return this;
         }
 
-        public Builder learningRate(double lr) {
-            this.lr = lr;
+        /** Learning rate schedule. Map of the iteration to the learning rate to apply at that iteration. */
+        public Builder learningRateSchedule(Map<Integer, Double> learningRateSchedule) {
+            this.learningRateSchedule = learningRateSchedule;
             return this;
         }
 
-        public Builder momentum(double momentum) {
-            this.momentum = momentum;
+        /** Rate to decrease learningRate by when the score stops improving.
+         * Learning rate is multiplied by this rate so ideally keep between 0 and 1. */
+        public Builder learningRateScoreBasedDecayRate(double lrScoreBasedDecay) {
+            this.lrScoreBasedDecay = lrScoreBasedDecay;
             return this;
         }
 
-        public Builder k(int k) {
-            this.k = k;
+        /** L1 regularization coefficient.*/
+        public Builder l1(double l1) {
+            this.l1 = l1;
             return this;
         }
 
-        public Builder corruptionLevel(double corruptionLevel) {
-            this.corruptionLevel = corruptionLevel;
-            return this;
-        }
-
-
-
-        public Builder momentumAfter(Map<Integer, Double> momentumAfter) {
-            this.momentumAfter = momentumAfter;
-            return this;
-        }
-
-        public Builder adagradResetIterations(int resetAdaGradIterations) {
-            this.resetAdaGradIterations = resetAdaGradIterations;
+        /** L2 regularization coefficient. */
+        public Builder l2(double l2) {
+            this.l2 = l2;
             return this;
         }
 
@@ -1058,124 +596,283 @@ public class NeuralNetConfiguration implements Serializable,Cloneable {
             return this;
         }
 
-        public Builder applySparsity(boolean applySparsity) {
-            this.applySparsity = applySparsity;
+        /** Momentum rate. */
+        public Builder momentum(double momentum) {
+            this.momentum = momentum;
             return this;
         }
 
-        public Builder weightInit(WeightInit weightInit) {
-            this.weightInit = weightInit;
+        /** Momentum schedule. Map of the iteration to the momentum rate to apply at that iteration. */
+        public Builder momentumAfter(Map<Integer, Double> momentumAfter) {
+            this.momentumSchedule = momentumAfter;
             return this;
         }
 
-
-
-        public Builder render(int renderWeightsEveryNumEpochs) {
-            this.renderWeightsEveryNumEpochs = renderWeightsEveryNumEpochs;
+        /** Gradient updater. For example, Updater.SGD for standard stochastic gradient descent,
+         * Updater.NESTEROV for Nesterov momentum, Updater.RSMPROP for RMSProp, etc.
+         * @see org.deeplearning4j.nn.conf.Updater
+         */
+        public Builder updater(Updater updater) {
+            this.updater = updater;
             return this;
         }
 
-        public Builder concatBiases(boolean concatBiases) {
-            this.concatBiases = concatBiases;
+        /**
+         * Ada delta coefficient
+         * @param rho
+         * @return
+         */
+        public Builder rho(double rho) {
+            this.rho = rho;
             return this;
         }
 
-
-
-        public Builder rng(RandomGenerator rng) {
-            this.rng = rng;
+        /** Decay rate for RMSProp. Only applies if using .updater(Updater.RMSPROP)
+         */
+        public Builder rmsDecay(double rmsDecay) {
+            this.rmsDecay = rmsDecay;
             return this;
         }
 
-        public Builder seed(long seed) {
-            this.seed = seed;
+        /** Mean decay rate for Adam updater. Only applies if using .updater(Updater.ADAM) */
+        public Builder adamMeanDecay(double adamMeanDecay) {
+            this.adamMeanDecay = adamMeanDecay;
             return this;
         }
 
+        /** Variance decay rate for Adam updater. Only applies if using .updater(Updater.ADAM) */
+        public Builder adamVarDecay(double adamVarDecay) {
+            this.adamVarDecay = adamVarDecay;
+            return this;
+        }
+
+        /** Gradient normalization strategy. Used to specify gradient renormalization, gradient clipping etc.
+         * @param gradientNormalization Type of normalization to use. Defaults to None.
+         * @see org.deeplearning4j.nn.conf.GradientNormalization
+         */
+        public Builder gradientNormalization(GradientNormalization gradientNormalization){
+            this.gradientNormalization = gradientNormalization;
+            return this;
+        }
+
+        /** Threshold for gradient normalization, only used for GradientNormalization.ClipL2PerLayer,
+         * GradientNormalization.ClipL2PerParamType, and GradientNormalization.ClipElementWiseAbsoluteValue<br>
+         * Not used otherwise.<br>
+         * L2 threshold for first two types of clipping, or absolute value threshold for last type of clipping.
+         */
+        public Builder gradientNormalizationThreshold(double threshold){
+            this.gradientNormalizationThreshold = threshold;
+            return this;
+        }
+
+        /** Learning rate decay policy. Used to adapt learning rate based on policy.
+         * @param policy Type of policy to use. Defaults to None.
+         */
+        public Builder learningRateDecayPolicy(LearningRatePolicy policy){
+            this.learningRatePolicy = policy;
+            return this;
+        }
+
+        /** Set the decay rate for the learning rate decay policy.
+         * @param lrPolicyDecayRate rate.
+         */
+        public Builder lrPolicyDecayRate(double lrPolicyDecayRate){
+            this.lrPolicyDecayRate = lrPolicyDecayRate;
+            return this;
+        }
+
+        /** Set the number of steps used for learning decay rate steps policy.
+         * @param lrPolicySteps number of steps
+         */
+        public Builder lrPolicySteps(double lrPolicySteps){
+            this.lrPolicySteps = lrPolicySteps;
+            return this;
+        }
+
+        /** Set the power used for learning rate inverse policy.
+         * @param lrPolicyPower power
+         */
+        public Builder lrPolicyPower(double lrPolicyPower){
+            this.lrPolicyPower = lrPolicyPower;
+            return this;
+        }
+
+        // VALIDATION SECTION //
+        private void updaterValidation(String layerName){
+            if ((!Double.isNaN(momentum) || !Double.isNaN(layer.getMomentum())) && layer.getUpdater() != Updater.NESTEROVS)
+                log.warn("Layer \"" + layerName + "\" momentum has been set but will not be applied unless the updater is set to NESTEROVS.");
+            if ((momentumSchedule != null || layer.getMomentumSchedule() != null) && layer.getUpdater() != Updater.NESTEROVS)
+                log.warn("Layer \"" + layerName + "\" momentum schedule has been set but will not be applied unless the updater is set to NESTEROVS.");
+            if ((!Double.isNaN(adamVarDecay) || (!Double.isNaN(layer.getAdamVarDecay()))) && layer.getUpdater() != Updater.ADAM)
+                log.warn("Layer \"" + layerName + "\" adamVarDecay is set but will not be applied unless the updater is set to Adam.");
+            if ((!Double.isNaN(adamMeanDecay) || !Double.isNaN(layer.getAdamMeanDecay())) && layer.getUpdater() != Updater.ADAM)
+                log.warn("Layer \"" + layerName + "\" adamMeanDecay is set but will not be applied unless the updater is set to Adam.");
+            if ((!Double.isNaN(rho) || !Double.isNaN(layer.getRho())) && layer.getUpdater() != Updater.ADADELTA)
+                log.warn("Layer \"" + layerName + "\" rho is set but will not be applied unless the updater is set to ADADELTA.");
+            if ((!Double.isNaN(rmsDecay) || (!Double.isNaN(layer.getRmsDecay()))) && layer.getUpdater() != Updater.RMSPROP)
+                log.warn("Layer \"" + layerName + "\" rmsdecay is set but will not be applied unless the updater is set to RMSPROP.");
+
+            switch (layer.getUpdater()) {
+                case NESTEROVS:
+                    if (Double.isNaN(momentum) && Double.isNaN(layer.getMomentum())) {
+                        layer.setMomentum(0.9);
+                        log.warn("Layer \"" + layerName + "\" momentum is automatically set to 0.9. Add momentum to configuration to change the value.");
+                    }
+                    else if (Double.isNaN(layer.getMomentum()))
+                        layer.setMomentum(momentum);
+                    if (momentumSchedule != null && layer.getMomentumSchedule() == null)
+                        layer.setMomentumSchedule(momentumSchedule);
+                    else if (momentumSchedule == null && layer.getMomentumSchedule() == null)
+                        layer.setMomentumSchedule(new HashMap<Integer, Double>());
+                    break;
+                case ADAM:
+                    if (Double.isNaN(adamMeanDecay) && Double.isNaN(layer.getAdamMeanDecay())) {
+                        layer.setAdamMeanDecay(0.9);
+                        log.warn("Layer \"" + layerName + "\" adamMeanDecay is automatically set to 0.9. Add adamVarDecay to configuration to change the value.");
+                    }
+                    else if (Double.isNaN(layer.getAdamMeanDecay()))
+                        layer.setAdamMeanDecay(adamMeanDecay);
+                    if (Double.isNaN(adamVarDecay) && Double.isNaN(layer.getAdamVarDecay())) {
+                        layer.setAdamVarDecay(0.999);
+                        log.warn("Layer \"" + layerName + "\" adamVarDecay is automatically set to 0.999. Add adamVarDecay to configuration to change the value.");
+                    }
+                    else if (Double.isNaN(layer.getAdamVarDecay()))
+                        layer.setAdamVarDecay(adamVarDecay);
+                    break;
+                case ADADELTA:
+                    if (Double.isNaN(layer.getRho()))
+                        layer.setRho(rho);
+                case RMSPROP:
+                    if (Double.isNaN(rmsDecay) && Double.isNaN(layer.getRmsDecay())) {
+                        layer.setRmsDecay(0.95);
+                        log.warn("Layer \"" + layerName + "\" rmsDecay is automatically set to 0.95. Add rmsDecay to configuration to change the value.");
+                    }
+                    else if (Double.isNaN(layer.getRmsDecay()))
+                        layer.setRmsDecay(rmsDecay);
+                    break;
+            }
+
+        }
+
+        private void learningRateValidation(String layerName){
+            if(learningRatePolicy != LearningRatePolicy.None && Double.isNaN(lrPolicyDecayRate) ) {
+                //LR policy, if used, should have a decay rate. 2 exceptions: Map for schedule, and Poly + power param
+                if(!(learningRatePolicy == LearningRatePolicy.Schedule && learningRateSchedule != null) &&
+                        !(learningRatePolicy == LearningRatePolicy.Poly && !Double.isNaN(lrPolicyPower)))
+                    throw new IllegalStateException("Layer \"" + layerName + "\" learning rate policy decay rate (lrPolicyDecayRate) must be set to use learningRatePolicy.");
+            }
+            switch (learningRatePolicy) {
+                case Inverse:
+                case Poly:
+                    if (Double.isNaN(lrPolicyPower))
+                        throw new IllegalStateException("Layer \"" + layerName + "\" learning rate policy power (lrPolicyPower) must be set to use " + learningRatePolicy);
+                        break;
+                case Step:
+                case Sigmoid:
+                    if (Double.isNaN(lrPolicySteps))
+                        throw new IllegalStateException("Layer \"" + layerName + "\" learning rate policy steps (lrPolicySteps) must be set to use " + learningRatePolicy);
+                    break;
+                case Schedule:
+                    if(learningRateSchedule == null)
+                        throw new IllegalStateException("Layer \"" + layerName + "\" learning rate policy schedule (learningRateSchedule) must be set to use " + learningRatePolicy);
+                    break;
+            }
+
+            if (!Double.isNaN(lrPolicyPower) && (learningRatePolicy != LearningRatePolicy.Inverse && learningRatePolicy != LearningRatePolicy.Poly))
+                throw new IllegalStateException("Layer \"" + layerName + "\" power has been set but will not be applied unless the learning rate policy is set to Inverse or Poly.");
+            if (!Double.isNaN(lrPolicySteps) && (learningRatePolicy != LearningRatePolicy.Step && learningRatePolicy != LearningRatePolicy.Sigmoid))
+                throw new IllegalStateException("Layer \"" + layerName + "\" steps have been set but will not be applied unless the learning rate policy is set to Step or Sigmoid.");
+            if ((learningRateSchedule != null) && (learningRatePolicy != LearningRatePolicy.Schedule))
+                throw new IllegalStateException("Layer \"" + layerName + "\" learning rate schedule has been set but will not be applied unless the learning rate policy is set to Schedule.");
+
+        }
+
+        private void generalValidation(String layerName){
+            if (useDropConnect && (Double.isNaN(dropOut) && (Double.isNaN(layer.getDropOut()))))
+                log.warn("Layer \"" + layerName + "\" dropConnect is set to true but dropout rate has not been added to configuration.");
+            if(useDropConnect && dropOut == 0.0) log.warn("Layer \"" + layerName + " dropConnect is set to true but dropout rate is set to 0.0");
+            if (useRegularization && (Double.isNaN(l1) && layer != null && Double.isNaN(layer.getL1())
+                    && Double.isNaN(l2) && Double.isNaN(layer.getL2())
+                    && (Double.isNaN(dropOut) || dropOut==0.0) && (Double.isNaN(layer.getDropOut()) || layer.getDropOut() == 0.0)))
+                log.warn( "Layer \"" + layerName + "\" regularization is set to true but l1, l2 or dropout has not been added to configuration.");
+            // CompGraph may have null layers TODO confirm valid configuration
+            if (layer != null) {
+                if (useRegularization) {
+                    if (!Double.isNaN(l1) && Double.isNaN(layer.getL1()))
+                        layer.setL1(l1);
+                    if (!Double.isNaN(l2) && Double.isNaN(layer.getL2()))
+                        layer.setL2(l2);
+                } else if (!useRegularization &&
+                        ((!Double.isNaN(l1) && l1 > 0.0) ||
+                        (!Double.isNaN(layer.getL1()) && layer.getL1() > 0.0) ||
+                        (!Double.isNaN(l2) && l2 > 0.0) ||
+                        (!Double.isNaN(layer.getL2()) && layer.getL2() > 0.0)))
+                    log.warn( "Layer \"" + layerName + "\" l1 or l2 has been added to configuration but useRegularization is set to false.");
+                if (Double.isNaN(l2) && Double.isNaN(layer.getL2()))
+                    layer.setL2(0.0);
+                if (Double.isNaN(l1) && Double.isNaN(layer.getL1()))
+                    layer.setL1(0.0);
+                if (layer.getWeightInit() == WeightInit.DISTRIBUTION) {
+                    if (dist != null && layer.getDist() == null)
+                        layer.setDist(dist);
+                    else if (dist == null && layer.getDist() == null) {
+                        layer.setDist(new NormalDistribution(1e-3, 1));
+                        log.warn("Layer \"" + layerName + "\" distribution is automatically set to normalize distribution with mean 1e-3 and variance 1.");
+                    }
+                } else if ((dist != null || layer.getDist() != null))
+                    log.warn("Layer \"" + layerName + "\" distribution is set but will not be applied unless weight init is set to WeighInit.DISTRIBUTION.");
+            }
+        }
+
+        ////////////////
+
+        /**
+         * Return a configuration based on this builder
+         *
+         * @return
+         */
         public NeuralNetConfiguration build() {
-            NeuralNetConfiguration ret = new NeuralNetConfiguration( sparsity,  useAdaGrad,  lr,  k,
-                    corruptionLevel,  numIterations,  momentum,  l2,  useRegularization, momentumAfter,
-                    resetAdaGradIterations,  dropOut,  applySparsity,  weightInit,  optimizationAlgo, lossFunction,  renderWeightsEveryNumEpochs,
-                    concatBiases,  constrainGradientToUnitNorm,  rng,
-                    dist,  seed,  nIn,  nOut,  activationFunction, visibleUnit,hiddenUnit,weightShape,filterSize,numFeatureMaps,stride,featureMapSize,numInFeatureMaps,listeners,layerFactory);
-            ret.useAdaGrad = this.adagrad;
-            ret.stepFunction = stepFunction;
-            return ret;
+
+            NeuralNetConfiguration conf = new NeuralNetConfiguration();
+            conf.minimize = minimize;
+            conf.maxNumLineSearchIterations = maxNumLineSearchIterations;
+            conf.layer = layer;
+            conf.numIterations = numIterations;
+            conf.useRegularization = useRegularization;
+            conf.optimizationAlgo = optimizationAlgo;
+            conf.seed = seed;
+            conf.stepFunction = stepFunction;
+            conf.useDropConnect = useDropConnect;
+            conf.miniBatch = miniBatch;
+            conf.learningRatePolicy = learningRatePolicy;
+            conf.lrPolicyDecayRate = lrPolicyDecayRate;
+            conf.lrPolicySteps = lrPolicySteps;
+            conf.lrPolicyPower = lrPolicyPower;
+            String layerName;
+            if(layer == null || layer.getLayerName() == null ) layerName = "Layer not named";
+            else layerName = "Layer " + layer.getLayerName() ;
+            learningRateValidation(layerName);
+
+            if(layer != null ) {
+                if (Double.isNaN(layer.getLearningRate())) layer.setLearningRate(learningRate);
+                if (Double.isNaN(layer.getBiasLearningRate())) layer.setBiasLearningRate(layer.getLearningRate());
+                if (layer.getLearningRateSchedule() == null) layer.setLearningRateSchedule(learningRateSchedule);
+                if (Double.isNaN(layer.getL1())) layer.setL1(l1);
+                if (Double.isNaN(layer.getL2())) layer.setL2(l2);
+                if (layer.getActivationFunction() == null) layer.setActivationFunction(activationFunction);
+                if (layer.getWeightInit() == null) layer.setWeightInit(weightInit);
+                if (Double.isNaN(layer.getBiasInit())) layer.setBiasInit(biasInit);
+                if (Double.isNaN(layer.getDropOut())) layer.setDropOut(dropOut);
+                if (layer.getUpdater() == null) layer.setUpdater(updater);
+                updaterValidation(layerName);
+                if (layer.getGradientNormalization() == null) layer.setGradientNormalization(gradientNormalization);
+                if (Double.isNaN(layer.getGradientNormalizationThreshold()))
+                    layer.setGradientNormalizationThreshold(gradientNormalizationThreshold);
+
+            }
+            generalValidation(layerName);
+            return conf;
         }
 
-
-
-
-
-
-        public Builder l2(double l2) {
-            this.l2 = l2;
-            return this;
-        }
-
-        public Builder regularization(boolean useRegularization) {
-            this.useRegularization = useRegularization;
-            return this;
-        }
-
-
-
-        public Builder resetAdaGradIterations(int resetAdaGradIterations) {
-            this.resetAdaGradIterations = resetAdaGradIterations;
-            return this;
-        }
-
-
-
-
-
-
-
-        public Builder optimizationAlgo(OptimizationAlgorithm optimizationAlgo) {
-            this.optimizationAlgo = optimizationAlgo;
-            return this;
-        }
-
-        public Builder lossFunction(LossFunctions.LossFunction lossFunction) {
-            this.lossFunction = lossFunction;
-            return this;
-        }
-
-
-
-        public Builder constrainGradientToUnitNorm(boolean constrainGradientToUnitNorm) {
-            this.constrainGradientToUnitNorm = constrainGradientToUnitNorm;
-            return this;
-        }
-
-
-
-
-
-        public Builder nIn(int nIn) {
-            this.nIn = nIn;
-            return this;
-        }
-
-        public Builder nOut(int nOut) {
-            this.nOut = nOut;
-            return this;
-        }
-
-        public Builder activationFunction(ActivationFunction activationFunction) {
-            this.activationFunction = activationFunction;
-            return this;
-        }
-
-
-        public Builder visibleUnit(RBM.VisibleUnit visibleUnit) {
-            this.visibleUnit = visibleUnit;
-            return this;
-        }
-
-        public Builder hiddenUnit(RBM.HiddenUnit hiddenUnit) {
-            this.hiddenUnit = hiddenUnit;
-            return this;
-        }
     }
 }

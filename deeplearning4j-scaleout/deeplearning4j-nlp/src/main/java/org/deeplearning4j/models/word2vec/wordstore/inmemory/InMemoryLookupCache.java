@@ -1,43 +1,91 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.models.word2vec.wordstore.inmemory;
 
-import org.apache.commons.io.IOUtils;
-import org.apache.commons.io.LineIterator;
 import org.deeplearning4j.berkeley.Counter;
 import org.deeplearning4j.models.word2vec.VocabWord;
-import org.deeplearning4j.models.word2vec.Word2Vec;
 import org.deeplearning4j.models.word2vec.wordstore.VocabCache;
 import org.deeplearning4j.text.movingwindow.Util;
 import org.deeplearning4j.util.Index;
 import org.deeplearning4j.util.SerializationUtils;
 
-
-import java.io.*;
-import java.util.*;
+import java.io.File;
+import java.io.InputStream;
+import java.io.Serializable;
+import java.util.Collection;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * In memory lookup cache for smaller datasets
  *
+ * PLEASE NOTE: Consider using AbstractCache instead.
+ *
  * @author Adam Gibson
  */
-public class InMemoryLookupCache implements VocabCache,Serializable {
+@Deprecated
+public class InMemoryLookupCache implements VocabCache<VocabWord>,Serializable {
 
     private Index wordIndex = new Index();
-    private Counter<String> wordFrequencies = Util.parallelCounter();
-    private Counter<String> docFrequencies = Util.parallelCounter();
-    private Map<String,VocabWord> vocabs = new ConcurrentHashMap<>();
-    private Map<String,VocabWord> tokens = new ConcurrentHashMap<>();
+    public Counter<String> wordFrequencies = Util.parallelCounter();
+    public Counter<String> docFrequencies = Util.parallelCounter();
+    public Map<String, VocabWord> vocabs = new ConcurrentHashMap<>();
+    public Map<String, VocabWord> tokens = new ConcurrentHashMap<>();
     private AtomicLong totalWordOccurrences = new AtomicLong(0);
     private int numDocs = 0;
 
-    public InMemoryLookupCache() {
-        VocabWord word = new VocabWord(1.0,Word2Vec.UNK);
-        word.setIndex(0);
-        addToken(word);
-        addWordToIndex(0, Word2Vec.UNK);
-        putVocabWord(Word2Vec.UNK);
+    public synchronized void setWordFrequencies(Counter <String> cnt) {
+        this.wordFrequencies = cnt;
+    }
+    public synchronized Map<String, VocabWord> getVocabs() {
+        return this.vocabs;
+    }
 
+    public synchronized void setVocabs(Map<String, VocabWord> vocabs) {
+        this.vocabs = vocabs;
+    }
+    public synchronized Counter<String> getWordFrequencies() {
+        return this.wordFrequencies;
+    }
+
+    public synchronized void setTokens(Map<String, VocabWord> tokens) {
+        this.tokens = tokens;
+    }
+    public synchronized Map<String, VocabWord> getTokens() {
+        return this.tokens;
+    }
+
+    public InMemoryLookupCache() {
+      //  this(false);
+    }
+
+    @Deprecated
+    public InMemoryLookupCache(boolean addUnk) {
+        /*if(addUnk) {
+            T word = (T) new SequenceElement(); //VocabWord(1.0, Word2Vec.UNK);
+            word.setIndex(0);
+            addToken(word);
+            addWordToIndex(0, Word2Vec.UNK);
+            putVocabWord(Word2Vec.UNK);
+        }
+        */
     }
 
     /**
@@ -46,7 +94,7 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * @returns all the words in the vocab
      */
     @Override
-    public  synchronized Collection<String> words() {
+    public synchronized Collection<String> words() {
         return vocabs.keySet();
     }
 
@@ -57,8 +105,8 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * @param word the word to increment the count for
      */
     @Override
-    public  void incrementWordCount(String word) {
-        incrementWordCount(word,1);
+    public synchronized void incrementWordCount(String word) {
+        incrementWordCount(word, 1);
     }
 
     /**
@@ -69,22 +117,16 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * @param increment the amount to increment by
      */
     @Override
-    public   void incrementWordCount(String word, int increment) {
+    public synchronized void incrementWordCount(String word, int increment) {
         if(word == null || word.isEmpty())
             throw new IllegalArgumentException("Word can't be empty or null");
-        wordFrequencies.incrementCount(word,1);
+        wordFrequencies.incrementCount(word, increment);
 
-        VocabWord token;
-        if(hasToken(word))
-            token = tokenFor(word);
-        else
-            token = new VocabWord(increment,word);
-        //token and word in vocab will be same reference
-        token.increment(increment);
+        if(hasToken(word)) {
+            VocabWord token = tokenFor(word);
+            token.increaseElementFrequency(increment);
+        }
         totalWordOccurrences.set(totalWordOccurrences.get() + increment);
-
-
-
     }
 
     /**
@@ -95,7 +137,7 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * the word occurs
      */
     @Override
-    public int wordFrequency(String word) {
+    public synchronized int wordFrequency(String word) {
         return (int) wordFrequencies.getCount(word);
     }
 
@@ -106,7 +148,7 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * @return
      */
     @Override
-    public boolean containsWord(String word) {
+    public synchronized boolean containsWord(String word) {
         return vocabs.containsKey(word);
     }
 
@@ -117,8 +159,13 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * @return the word at the given index
      */
     @Override
-    public String wordAtIndex(int index) {
+    public synchronized String wordAtIndex(int index) {
         return (String) wordIndex.get(index);
+    }
+
+    @Override
+    public VocabWord elementAtIndex(int index) {
+        return wordFor(wordAtIndex(index));
     }
 
     /**
@@ -129,8 +176,10 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * if not found
      */
     @Override
-    public int indexOf(String word) {
-        return wordIndex.indexOf(word);
+    public synchronized int indexOf(String word) {
+        if (containsWord(word)) {
+            return wordFor(word).getIndex();
+        } return -1;
     }
 
 
@@ -140,7 +189,7 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * @return
      */
     @Override
-    public Collection<VocabWord> vocabWords() {
+    public synchronized Collection<VocabWord> vocabWords() {
         return vocabs.values();
     }
 
@@ -150,7 +199,7 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * @return the total number of word occurrences
      */
     @Override
-    public long totalWordOccurrences() {
+    public synchronized long totalWordOccurrences() {
         return  totalWordOccurrences.get();
     }
 
@@ -161,12 +210,10 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * @return
      */
     @Override
-    public synchronized  VocabWord wordFor(String word) {
+    public  synchronized  VocabWord wordFor(String word) {
         if(word == null)
             return null;
         VocabWord ret =  vocabs.get(word);
-        if(ret == null)
-            return vocabs.get(Word2Vec.UNK);
         return ret;
     }
 
@@ -178,9 +225,29 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
     public synchronized void addWordToIndex(int index, String word) {
         if(word == null || word.isEmpty())
             throw new IllegalArgumentException("Word can't be empty or null");
-        if(!wordFrequencies.containsKey(word))
-            wordFrequencies.incrementCount(word,1);
-        wordIndex.add(word,index);
+
+
+
+        if(!tokens.containsKey(word)) {
+            VocabWord token = new VocabWord(1.0, word);
+            tokens.put(word, token);
+            wordFrequencies.incrementCount(word, 1.0);
+        }
+
+        /*
+            If we're speaking about adding any word to index directly, it means it's going to be vocab word, not token
+         */
+        if (!vocabs.containsKey(word)) {
+            VocabWord vw = tokenFor(word);
+            vw.setIndex(index);
+            vocabs.put(word, vw);
+            vw.setIndex(index);
+        }
+
+        if (!wordFrequencies.containsKey(word))
+                wordFrequencies.incrementCount(word, 1);
+
+            wordIndex.add(word, index);
 
     }
 
@@ -188,17 +255,24 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * @param word
      */
     @Override
+    @Deprecated
     public synchronized void putVocabWord(String word) {
         if(word == null || word.isEmpty())
             throw new IllegalArgumentException("Word can't be empty or null");
+        // STOP and UNK are not added as tokens
+        if(word.equals("STOP") || word.equals("UNK"))
+            return;
         VocabWord token = tokenFor(word);
-        addWordToIndex(token.getIndex(),word);
+        if(token == null)
+            throw new IllegalStateException("Word " + word + " not found as token in vocab");
+        int ind = token.getIndex();
+        addWordToIndex(ind, word);
         if(!hasToken(word))
             throw new IllegalStateException("Unable to add token " + word + " when not already a token");
         vocabs.put(word,token);
         wordIndex.add(word,token.getIndex());
-
     }
+
 
     /**
      * Returns the number of words in the cache
@@ -211,64 +285,101 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
     }
 
     @Override
-    public int docAppearedIn(String word) {
+    public synchronized int docAppearedIn(String word) {
         return (int) docFrequencies.getCount(word);
     }
 
     @Override
-    public void incrementDocCount(String word, int howMuch) {
+    public synchronized void incrementDocCount(String word, int howMuch) {
         docFrequencies.incrementCount(word, howMuch);
     }
 
     @Override
-    public void setCountForDoc(String word, int count) {
+    public synchronized void setCountForDoc(String word, int count) {
         docFrequencies.setCount(word, count);
     }
 
     @Override
-    public int totalNumberOfDocs() {
+    public synchronized int totalNumberOfDocs() {
         return numDocs;
     }
 
     @Override
-    public void incrementTotalDocCount() {
+    public synchronized void incrementTotalDocCount() {
         numDocs++;
     }
 
     @Override
-    public void incrementTotalDocCount(int by) {
+    public synchronized void incrementTotalDocCount(int by) {
         numDocs += by;
     }
 
     @Override
-    public Collection<VocabWord> tokens() {
+    public synchronized Collection<VocabWord> tokens() {
         return tokens.values();
     }
 
     @Override
-    public void addToken(VocabWord word) {
-        tokens.put(word.getWord(),word);
+    public synchronized void addToken(VocabWord word) {
+        tokens.put(word.getLabel(),word);
     }
 
     @Override
-    public VocabWord tokenFor(String word) {
+    public synchronized VocabWord tokenFor(String word) {
         return tokens.get(word);
     }
 
     @Override
-    public boolean hasToken(String token) {
+    public synchronized boolean hasToken(String token) {
         return tokenFor(token) != null;
     }
 
+    @Override
+    public void importVocabulary(VocabCache<VocabWord> vocabCache) {
+        for (VocabWord word: vocabCache.vocabWords()) {
+            if (vocabs.containsKey(word.getLabel())) {
+                wordFrequencies.incrementCount(word.getLabel(), word.getElementFrequency());
+            } else {
+                tokens.put(word.getLabel(), word);
+                vocabs.put(word.getLabel(), word);
+                wordFrequencies.incrementCount(word.getLabel(), word.getElementFrequency());
+            }
+            totalWordOccurrences.addAndGet((long) word.getElementFrequency());
+        }
+    }
+
+    @Override
+    public void updateWordsOccurencies() {
+        totalWordOccurrences.set(0);
+        for (VocabWord word: vocabWords()) {
+            totalWordOccurrences.addAndGet((long) word.getElementFrequency());
+        }
+    }
+
+    @Override
+    public void removeElement(String label) {
+        if (vocabs.containsKey(label)) {
+            vocabs.remove(label);
+        }
+
+        if (tokens.containsKey(label)) {
+            tokens.remove(label);
+        }
+    }
+
+    @Override
+    public void removeElement(VocabWord element) {
+        removeElement(element.getLabel());
+    }
 
 
     @Override
-    public void saveVocab() {
+    public synchronized void saveVocab() {
         SerializationUtils.saveObject(this, new File("ser"));
     }
 
     @Override
-    public boolean vocabExists() {
+    public synchronized boolean vocabExists() {
         return new File("ser").exists();
     }
 
@@ -280,6 +391,7 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
      * @return the in memory lookup cache
      */
     public static InMemoryLookupCache load(InputStream from) {
+        /*
         Reader inputStream = new InputStreamReader(from);
         LineIterator iter = IOUtils.lineIterator(inputStream);
         String line;
@@ -292,18 +404,19 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
             ret.incrementWordCount(line);
             VocabWord word = new VocabWord(1.0,line);
             word.setIndex(count);
-            ret.addToken(word);
+            ret.addToken((SequenceElement) word);
             ret.addWordToIndex(count,line);
             ret.putVocabWord(line);
             count++;
 
         }
 
-        return ret;
+        return ret; */
+        return null;
     }
 
     @Override
-    public void loadVocab() {
+    public synchronized void loadVocab() {
         InMemoryLookupCache cache = SerializationUtils.readObject(new File("ser"));
         this.vocabs = cache.vocabs;
         this.wordFrequencies = cache.wordFrequencies;
@@ -313,11 +426,48 @@ public class InMemoryLookupCache implements VocabCache,Serializable {
 
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
 
+        InMemoryLookupCache that = (InMemoryLookupCache) o;
 
+        if (numDocs != that.numDocs) return false;
+        if (wordIndex != null ? !wordIndex.equals(that.wordIndex) : that.wordIndex != null) return false;
+        if (wordFrequencies != null ? !wordFrequencies.equals(that.wordFrequencies) : that.wordFrequencies != null)
+            return false;
+        if (docFrequencies != null ? !docFrequencies.equals(that.docFrequencies) : that.docFrequencies != null)
+            return false;
+        if(vocabWords().equals(that.vocabWords()))
+            return true;
 
+        return true;
 
+    }
 
+    @Override
+    public int hashCode() {
+        int result = wordIndex != null ? wordIndex.hashCode() : 0;
+        result = 31 * result + (wordFrequencies != null ? wordFrequencies.hashCode() : 0);
+        result = 31 * result + (docFrequencies != null ? docFrequencies.hashCode() : 0);
+        result = 31 * result + (vocabs != null ? vocabs.hashCode() : 0);
+        result = 31 * result + (tokens != null ? tokens.hashCode() : 0);
+        result = 31 * result + (totalWordOccurrences != null ? totalWordOccurrences.hashCode() : 0);
+        result = 31 * result + numDocs;
+        return result;
+    }
 
-
+    @Override
+    public String toString() {
+        return "InMemoryLookupCache{" +
+                "wordIndex=" + wordIndex +
+                ", wordFrequencies=" + wordFrequencies +
+                ", docFrequencies=" + docFrequencies +
+                ", vocabs=" + vocabs +
+                ", tokens=" + tokens +
+                ", totalWordOccurrences=" + totalWordOccurrences +
+                ", numDocs=" + numDocs +
+                '}';
+    }
 }

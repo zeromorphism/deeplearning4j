@@ -1,4 +1,26 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.aws.ec2.provision;
+
+import com.jcraft.jsch.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.BufferedInputStream;
 import java.io.File;
@@ -6,16 +28,6 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Collection;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import com.jcraft.jsch.Channel;
-import com.jcraft.jsch.ChannelExec;
-import com.jcraft.jsch.ChannelSftp;
-import com.jcraft.jsch.JSch;
-import com.jcraft.jsch.Session;
-import com.jcraft.jsch.UserInfo;
 /**
  * Meant for uploading files to remote servers
  * @author Adam Gibson
@@ -28,7 +40,7 @@ public class HostProvisioner implements UserInfo {
 	private String user;
 	private int port = 22;
 	private String password;
-	private static Logger log = LoggerFactory.getLogger(HostProvisioner.class);
+	private static final Logger log = LoggerFactory.getLogger(HostProvisioner.class);
 
 	/**
 	 * 
@@ -78,7 +90,7 @@ public class HostProvisioner implements UserInfo {
 
 
 	public void uploadAndRun(String script,String rootDir) throws Exception {
-		String remoteName = rootDir.isEmpty() ? new File(script).getName() : rootDir + "/" + script;
+		String remoteName = rootDir.isEmpty() ? new File(script).getName() : rootDir + "/" + new File(script).getName();
 		upload(new File(script),remoteName);
 
 		String remoteCommand = remoteName.charAt(0) != '/' ? "./" + remoteName : remoteName;
@@ -100,19 +112,21 @@ public class HostProvisioner implements UserInfo {
 		channel.connect();
 		channel.start();
 		InputStream input = channel.getInputStream();
+
 		//start reading the input from the executed commands on the shell
-		byte[] tmp = new byte[1024];
+		byte[] tmp = new byte[60000];
 		while (true) {
 			while (input.available() > 0) {
-				int i = input.read(tmp, 0, 1024);
-				if (i < 0) break;
+				int i = input.read(tmp, 0, tmp.length);
+				if (i < 0)
+					break;
 				log.info(new String(tmp, 0, i));
 			}
 			if (channel.isClosed()){
 				log.info("exit-status: " + channel.getExitStatus());
 				break;
 			}
-			Thread.sleep(1000);
+
 		}
 
 		channel.disconnect();
@@ -254,7 +268,7 @@ public class HostProvisioner implements UserInfo {
             c.exit();
             session.disconnect();
         }catch(Exception e) {
-            log.info("Session was down...trying again");
+            log.info("Session was down...trying again",e);
             upload(f,remoteFile);
         }
 	}

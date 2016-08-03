@@ -1,3 +1,21 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.util;
 
 import org.apache.commons.math3.util.FastMath;
@@ -19,8 +37,8 @@ public class Viterbi implements Serializable {
     private INDArray possibleLabels;
     private  int states;
 
-    private double logPCorrect = FastMath.log(pCorrect);
-    private double logPIncorrect = FastMath.log(1 - pCorrect / states - 1);
+    private double logPCorrect;
+    private double logPIncorrect;
     private double logMetaInstability = Math.log(metaStability);
     private  double logOfDiangnalTProb;
     private double logStates;
@@ -35,6 +53,8 @@ public class Viterbi implements Serializable {
     public Viterbi(INDArray possibleLabels) {
         this.possibleLabels = possibleLabels;
         this.states = possibleLabels.length();
+        this.logPCorrect = FastMath.log(pCorrect);
+        this.logPIncorrect = FastMath.log(1 - pCorrect / states - 1);
         logOfDiangnalTProb = FastMath.log(1 - metaStability / states - 1);
         this.logStates = FastMath.log(states);
     }
@@ -73,8 +93,7 @@ public class Viterbi implements Serializable {
                 if(k == element)
                     V.put(t,k,logPCorrect + maxVal);
                 else
-                    V.put(t,k, logPIncorrect + maxVal);
-
+                    V.put(t,k,logPIncorrect + maxVal);
 
             }
         }
@@ -102,9 +121,6 @@ public class Viterbi implements Serializable {
             ret.put(i,0, Nd4j.getBlasWrapper().iamax(outcomes.getRow(i)));
         return ret;
     }
-
-
-
 
     public double getMetaStability() {
         return metaStability;

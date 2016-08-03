@@ -1,8 +1,28 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.nn.api;
 
-import org.deeplearning4j.datasets.iterator.DataSetIterator;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.dataset.api.DataSet;
+import org.nd4j.linalg.dataset.api.iterator.DataSetIterator;
+
+import java.util.List;
 
 
 /**
@@ -21,7 +41,7 @@ public interface Classifier extends Model {
      * @param data the data to score
      * @return the score for the given input,label pairs
      */
-    double score(DataSet data);
+    double f1Score(DataSet data);
 
     /**
      * Returns the f1 score for the given examples.
@@ -32,7 +52,7 @@ public interface Classifier extends Model {
      * @param labels the true labels
      * @return the scores for each ndarray
      */
-    double score(INDArray examples, INDArray labels);
+    double f1Score(INDArray examples, INDArray labels);
 
     /**
      * Returns the number of possible labels
@@ -40,6 +60,10 @@ public interface Classifier extends Model {
      */
     int numLabels();
 
+    /**
+     * Train the model based on the datasetiterator
+     * @param iter the iterator to train on
+     */
     void fit(DataSetIterator iter);
 
     /**
@@ -50,6 +74,13 @@ public interface Classifier extends Model {
      */
     int[] predict(INDArray examples);
 
+    /**
+     * Takes in a DataSet of examples
+     * For each row, returns a label
+     * @param dataSet the examples to classify
+     * @return the labels for each example
+     */
+    List<String> predict(DataSet dataSet);
 
     /**
      * Returns the probabilities for each label
@@ -65,7 +96,7 @@ public interface Classifier extends Model {
      * @param examples the examples to classify (one example in each row)
      * @param labels the example labels(a binary outcome matrix)
      */
-    void fit(INDArray examples,INDArray labels);
+    void fit(INDArray examples, INDArray labels);
 
     /**
      * Fit the model

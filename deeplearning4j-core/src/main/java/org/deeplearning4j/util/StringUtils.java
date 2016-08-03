@@ -1,19 +1,19 @@
-/**
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+/*
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
  */
 
 package org.deeplearning4j.util;
@@ -40,6 +40,9 @@ public class StringUtils {
         NumberFormat numberFormat = NumberFormat.getNumberInstance(Locale.ENGLISH);
         decimalFormat = (DecimalFormat) numberFormat;
         decimalFormat.applyPattern("#.##");
+    }
+
+    private StringUtils() {
     }
 
     /**
@@ -121,7 +124,7 @@ public class StringUtils {
 
     public static String arrayToString(String[] strs) {
         if (strs.length == 0) { return ""; }
-        StringBuffer sbuf = new StringBuffer();
+        StringBuilder sbuf = new StringBuilder();
         sbuf.append(strs[0]);
         for (int idx = 1; idx < strs.length; idx++) {
             sbuf.append(",");
@@ -176,7 +179,7 @@ public class StringUtils {
         if (uris == null) {
             return null;
         }
-        StringBuffer ret = new StringBuffer(uris[0].toString());
+        StringBuilder ret = new StringBuilder(uris[0].toString());
         for(int i = 1; i < uris.length;i++){
             ret.append(",");
             ret.append(uris[i].toString());
@@ -197,7 +200,7 @@ public class StringUtils {
                 uris[i] = new URI(str[i]);
             }catch(URISyntaxException ur){
                 System.out.println("Exception in specified URI's " + StringUtils.stringifyException(ur));
-                //making sure its asssigned to null in case of an error
+                //making sure its assigned to null in case of an error
                 uris[i] = null;
             }
         }
@@ -227,7 +230,7 @@ public class StringUtils {
      * @param timeDiff The time difference to format
      */
     public static String formatTime(long timeDiff){
-        StringBuffer buf = new StringBuffer();
+        StringBuilder buf = new StringBuilder();
         long hours = timeDiff / (60*60*1000);
         long rem = (timeDiff % (60*60*1000));
         long minutes =  rem / (60*1000);
@@ -259,7 +262,7 @@ public class StringUtils {
      */
     public static String getFormattedTimeWithDiff(DateFormat dateFormat,
                                                   long finishTime, long startTime){
-        StringBuffer buf = new StringBuffer();
+        StringBuilder buf = new StringBuilder();
         if (0 != finishTime) {
             buf.append(dateFormat.format(new Date(finishTime)));
             if (0 != startTime){
@@ -271,12 +274,12 @@ public class StringUtils {
 
     /**
      * Returns an arraylist of strings.
-     * @param str the comma seperated string values
-     * @return the arraylist of the comma seperated string values
+     * @param str the comma separated string values
+     * @return the arraylist of the comma separated string values
      */
     public static String[] getStrings(String str){
         Collection<String> values = getStringCollection(str);
-        if(values.size() == 0) {
+        if(values.isEmpty()) {
             return null;
         }
         return values.toArray(new String[values.size()]);
@@ -284,15 +287,14 @@ public class StringUtils {
 
     /**
      * Returns a collection of strings.
-     * @param str comma seperated string values
+     * @param str comma separated string values
      * @return an <code>ArrayList</code> of string values
      */
     public static Collection<String> getStringCollection(String str){
-        List<String> values = new ArrayList<String>();
+        List<String> values = new ArrayList<>();
         if (str == null)
             return values;
         StringTokenizer tokenizer = new StringTokenizer (str,",");
-        values = new ArrayList<String>();
         while (tokenizer.hasMoreTokens()) {
             values.add(tokenizer.nextToken());
         }
@@ -323,7 +325,6 @@ public class StringUtils {
 
     final public static String[] emptyStringArray = {};
     final public static char COMMA = ',';
-    final public static String COMMA_STR = ",";
     final public static char ESCAPE_CHAR = '\\';
 
     /**
@@ -347,7 +348,7 @@ public class StringUtils {
         if (str==null) {
             return null;
         }
-        ArrayList<String> strList = new ArrayList<String>();
+        ArrayList<String> strList = new ArrayList<>();
         StringBuilder split = new StringBuilder();
         int index = 0;
         while ((index = findNext(str, separator, escapeChar, index, split)) >= 0) {
@@ -522,7 +523,7 @@ public class StringUtils {
      * @return a message for logging
      */
     private static String toStartupShutdownString(String prefix, String [] msg) {
-        StringBuffer b = new StringBuffer(prefix);
+        StringBuilder b = new StringBuilder(prefix);
         b.append("\n/************************************************************");
         for(String s : msg)
             b.append("\n" + prefix + s);
@@ -537,7 +538,7 @@ public class StringUtils {
      * which can be represented by a 64-bit integer.
      * TraditionalBinaryPrefix symbol are case insensitive.
      */
-    public static enum TraditionalBinaryPrefix {
+    public enum TraditionalBinaryPrefix {
         KILO(1024),
         MEGA(KILO.value << 10),
         GIGA(MEGA.value << 10),
@@ -604,7 +605,7 @@ public class StringUtils {
         if(string == null) {
             return null;
         }
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         boolean lastCharacterWasSpace = false;
         char[] chars = string.toCharArray();
         for(char c : chars) {
@@ -635,8 +636,8 @@ public class StringUtils {
      * Return an abbreviated English-language desc of the byte length
      */
     public static String byteDesc(long len) {
-        double val = 0.0;
-        String ending = "";
+        double val;
+        String ending;
         if (len < 1024 * 1024) {
             val = (1.0 * len) / 1024;
             ending = " KB";
@@ -667,7 +668,7 @@ public class StringUtils {
      * @param strings Strings to join.
      */
     public static String join(CharSequence separator, Iterable<String> strings) {
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         boolean first = true;
         for (String s : strings) {
             if (first) {
@@ -688,7 +689,7 @@ public class StringUtils {
      */
     public static String joinObjects(
             CharSequence separator, Iterable<? extends Object> objects) {
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         boolean first = true;
         for (Object o : objects) {
             if (first) {

@@ -1,21 +1,43 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.text.movingwindow;
+
+import lombok.NonNull;
+import org.deeplearning4j.berkeley.StringUtils;
+import org.deeplearning4j.text.tokenization.tokenizer.DefaultStreamTokenizer;
+import org.deeplearning4j.text.tokenization.tokenizer.Tokenizer;
+import org.deeplearning4j.text.tokenization.tokenizerfactory.TokenizerFactory;
 
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.StringTokenizer;
 
-import org.deeplearning4j.berkeley.StringUtils;
-import org.deeplearning4j.text.tokenization.tokenizer.DefaultStreamTokenizer;
-import org.deeplearning4j.text.tokenization.tokenizer.Tokenizer;
-import org.deeplearning4j.text.tokenization.tokenizerfactory.TokenizerFactory;
-
 /**
- * Static utility class for textual based windowing functions
+ * Static utility class for textual based windowing cooccurrences
  * @author Adam Gibson
  */
 public class Windows {
 
+
+    private Windows() {
+    }
 
     /**
      * Constructs a list of window of size windowSize.
@@ -62,7 +84,7 @@ public class Windows {
      */
     public static List<Window> windows(String words,int windowSize) {
         StringTokenizer tokenizer = new StringTokenizer(words);
-        List<String> list = new ArrayList<String>();
+        List<String> list = new ArrayList<>();
         while(tokenizer.hasMoreTokens())
             list.add(tokenizer.nextToken());
         return windows(list,windowSize);
@@ -76,7 +98,7 @@ public class Windows {
      * @param windowSize the window size to generate
      * @return the list of windows for the tokenized string
      */
-    public static List<Window> windows(String words,TokenizerFactory tokenizerFactory,int windowSize) {
+    public static List<Window> windows(String words, @NonNull TokenizerFactory tokenizerFactory, int windowSize) {
         Tokenizer tokenizer = tokenizerFactory.create(words);
         List<String> list = new ArrayList<>();
         while(tokenizer.hasMoreTokens())
@@ -97,7 +119,7 @@ public class Windows {
      */
     public static List<Window> windows(String words) {
         StringTokenizer tokenizer = new StringTokenizer(words);
-        List<String> list = new ArrayList<String>();
+        List<String> list = new ArrayList<>();
         while(tokenizer.hasMoreTokens())
             list.add(tokenizer.nextToken());
         return windows(list,5);
@@ -147,7 +169,7 @@ public class Windows {
         String window2 = StringUtils.join(onlyTokens);
         int begin = wholeSentence.indexOf(window2);
         int end =   begin + window2.length();
-        return new Window(window,begin,end);
+        return new Window(window, windowSize, begin,end);
 
     }
 

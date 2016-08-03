@@ -1,17 +1,27 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.berkeley;
 
 
 import java.io.Serializable;
 import java.text.NumberFormat;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 import java.util.Map.Entry;
 
 
@@ -165,7 +175,7 @@ public class Counter<E> implements Serializable {
 		double total = totalCount();
 		if (total <= 0.0) {
 			throw new RuntimeException(String.format(
-					"Attempting to sample() with totalCount() %.3f\n", total));
+					"Attempting to sample() with totalCount() %.3f%n", total));
 		}
 		double sum = 0.0;
 		double r = rand.nextDouble();
@@ -210,11 +220,11 @@ public class Counter<E> implements Serializable {
 	 * sets to val if key is not yet present.
 	 * 
 	 * @param key
-	 * @param increment
+	 * @param val
 	 */
 	public void setMaxCount(E key, double val) {
 		Double value = entries.get(key);
-		if (value == null || val > value.doubleValue()) {
+		if (value == null || val > value) {
 			setCount(key, val);
 
 			dirty = true;
@@ -226,11 +236,11 @@ public class Counter<E> implements Serializable {
 	 * sets to val if key is not yet present.
 	 * 
 	 * @param key
-	 * @param increment
+	 * @param val
 	 */
 	public void setMinCount(E key, double val) {
 		Double value = entries.get(key);
-		if (value == null || val < value.doubleValue()) {
+		if (value == null || val < value) {
 			setCount(key, val);
 
 			dirty = true;
@@ -289,7 +299,7 @@ public class Counter<E> implements Serializable {
 
 	public List<E> getSortedKeys() {
 		PriorityQueue<E> pq = this.asPriorityQueue();
-		List<E> keys = new ArrayList<E>();
+		List<E> keys = new ArrayList<>();
 		while (pq.hasNext()) {
 			keys.add(pq.next());
 		}
@@ -352,7 +362,7 @@ public class Counter<E> implements Serializable {
 		NumberFormat f = NumberFormat.getInstance();
 		f.setMaximumFractionDigits(5);
 		int numKeysPrinted = 0;
-		for (E element : new TreeSet<E>(keySet())) {
+		for (E element : new TreeSet<>(keySet())) {
 
 			sb.append(element.toString());
 			sb.append(" : ");
@@ -393,7 +403,7 @@ public class Counter<E> implements Serializable {
 	 * whose priorities are those elements' counts in the counter.
 	 */
 	public PriorityQueue<E> asPriorityQueue() {
-		PriorityQueue<E> pq = new PriorityQueue<E>(entries.size());
+		PriorityQueue<E> pq = new PriorityQueue<>(entries.size());
 		for (Map.Entry<E, Double> entry : entries.entrySet()) {
 			pq.add(entry.getKey(), entry.getValue());
 		}
@@ -407,7 +417,7 @@ public class Counter<E> implements Serializable {
 	 * @return
 	 */
 	public PriorityQueue<E> asMinPriorityQueue() {
-		PriorityQueue<E> pq = new PriorityQueue<E>(entries.size());
+		PriorityQueue<E> pq = new PriorityQueue<>(entries.size());
 		for (Map.Entry<E, Double> entry : entries.entrySet()) {
 			pq.add(entry.getKey(), -entry.getValue());
 		}
@@ -430,7 +440,7 @@ public class Counter<E> implements Serializable {
 
 	public Counter(Map<? extends E, Double> mapCounts) {
 		this(false);
-		this.entries = new HashMap<E, Double>();
+		this.entries = new HashMap<>();
 		for (Entry<? extends E, Double> entry : mapCounts.entrySet()) {
 			incrementCount(entry.getKey(), entry.getValue());
 		}
@@ -472,7 +482,7 @@ public class Counter<E> implements Serializable {
 	}
 
 	public static void main(String[] args) {
-		Counter<String> counter = new Counter<String>();
+		Counter<String> counter = new Counter<>();
 		System.out.println(counter);
 		counter.incrementCount("planets", 7);
 		System.out.println(counter);
@@ -500,7 +510,7 @@ public class Counter<E> implements Serializable {
 	}
 
 	private void keepKeysHelper(int keepN, boolean top) {
-		Counter<E> tmp = new Counter<E>();
+		Counter<E> tmp = new Counter<>();
 
 		int n = 0;
 		for (E e : Iterators.able(top ? asPriorityQueue() : asMinPriorityQueue())) {
@@ -547,7 +557,7 @@ public class Counter<E> implements Serializable {
 	}
 
 	public Counter<E> scaledClone(double c) {
-		Counter<E> newCounter = new Counter<E>();
+		Counter<E> newCounter = new Counter<>();
 
 		for (Map.Entry<E, Double> entry : getEntrySet()) {
 			newCounter.setCount(entry.getKey(), entry.getValue() * c);
@@ -557,7 +567,7 @@ public class Counter<E> implements Serializable {
 	}
 
 	public Counter<E> difference(Counter<E> counter) {
-		Counter<E> clone = new Counter<E>(this);
+		Counter<E> clone = new Counter<>(this);
 		for (E key : counter.keySet()) {
 			double count = counter.getCount(key);
 			clone.incrementCount(key, -1 * count);
@@ -566,7 +576,7 @@ public class Counter<E> implements Serializable {
 	}
 
 	public Counter<E> toLogSpace() {
-		Counter<E> newCounter = new Counter<E>(this);
+		Counter<E> newCounter = new Counter<>(this);
 		for (E key : newCounter.keySet()) {
 			newCounter.setCount(key, Math.log(getCount(key)));
 		}
@@ -595,4 +605,31 @@ public class Counter<E> implements Serializable {
 		return sb.toString();
 	}
 
+	@Override
+	public boolean equals(Object o) {
+		if (this == o) return true;
+		if (o == null || getClass() != o.getClass()) return false;
+
+		Counter<?> counter = (Counter<?>) o;
+
+		if (dirty != counter.dirty) return false;
+		if (Double.compare(counter.cacheTotal, cacheTotal) != 0) return false;
+		if (Double.compare(counter.deflt, deflt) != 0) return false;
+		return !(entries != null ? !entries.equals(counter.entries) : counter.entries != null);
+
+	}
+
+	@Override
+	public int hashCode() {
+		int result;
+		long temp;
+		result = entries != null ? entries.hashCode() : 0;
+		result = 31 * result + (dirty ? 1 : 0);
+		temp = Double.doubleToLongBits(cacheTotal);
+		result = 31 * result + (int) (temp ^ (temp >>> 32));
+		result = 31 * result + (mf != null ? mf.hashCode() : 0);
+		temp = Double.doubleToLongBits(deflt);
+		result = 31 * result + (int) (temp ^ (temp >>> 32));
+		return result;
+	}
 }

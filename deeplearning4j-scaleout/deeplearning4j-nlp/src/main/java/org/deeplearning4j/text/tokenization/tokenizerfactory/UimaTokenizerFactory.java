@@ -1,18 +1,34 @@
-package org.deeplearning4j.text.tokenization.tokenizerfactory;
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
 
-import java.io.InputStream;
+package org.deeplearning4j.text.tokenization.tokenizerfactory;
 
 import org.apache.uima.analysis_engine.AnalysisEngine;
 import org.apache.uima.fit.factory.AnalysisEngineFactory;
 import org.apache.uima.resource.ResourceInitializationException;
-import org.apache.uima.util.CasPool;
 import org.deeplearning4j.text.annotator.SentenceAnnotator;
-import org.deeplearning4j.text.annotator.StemmerAnnotator;
 import org.deeplearning4j.text.annotator.TokenizerAnnotator;
 import org.deeplearning4j.text.tokenization.tokenizer.TokenPreProcess;
-import org.deeplearning4j.text.tokenization.tokenizer.UimaTokenizer;
 import org.deeplearning4j.text.tokenization.tokenizer.Tokenizer;
+import org.deeplearning4j.text.tokenization.tokenizer.UimaTokenizer;
 import org.deeplearning4j.text.uima.UimaResource;
+
+import java.io.InputStream;
 
 
 /**
@@ -25,27 +41,22 @@ import org.deeplearning4j.text.uima.UimaResource;
  */
 public class UimaTokenizerFactory implements TokenizerFactory {
 
-
 	private UimaResource uimaResource;
 	private boolean checkForLabel;
 	private static AnalysisEngine defaultAnalysisEngine;
-    private TokenPreProcess preProcess;
+	private TokenPreProcess preProcess;
 
 	public UimaTokenizerFactory() throws ResourceInitializationException {
 		this(defaultAnalysisEngine(),true);
 	}
 
-
 	public UimaTokenizerFactory(UimaResource resource) {
 		this(resource,true);
 	}
 
-
 	public UimaTokenizerFactory(AnalysisEngine tokenizer) {
 		this(tokenizer,true);
 	}
-
-
 
 	public UimaTokenizerFactory(UimaResource resource,boolean checkForLabel) {
 		this.uimaResource = resource;
@@ -56,31 +67,24 @@ public class UimaTokenizerFactory implements TokenizerFactory {
 		this(defaultAnalysisEngine(),checkForLabel);
 	}
 
-
-
 	public UimaTokenizerFactory(AnalysisEngine tokenizer,boolean checkForLabel) {
 		super();
 		this.checkForLabel = checkForLabel;
 		try {
 			this.uimaResource = new UimaResource(tokenizer);
-
-
 		}catch(Exception e) {
 			throw new RuntimeException(e);
 		}
 	}
 
-
-
 	@Override
 	public  Tokenizer create(String toTokenize) {
-		if(toTokenize == null || toTokenize.isEmpty())
+		if(toTokenize == null)
 			throw new IllegalArgumentException("Unable to proceed; on sentence to tokenize");
-		Tokenizer ret =  new UimaTokenizer(toTokenize,uimaResource,checkForLabel);
-        ret.setTokenPreProcessor(preProcess);
-        return ret;
+		Tokenizer ret = new UimaTokenizer(toTokenize,uimaResource,checkForLabel);
+		ret.setTokenPreProcessor(preProcess);
+		return ret;
 	}
-
 
 	public UimaResource getUimaResource() {
 		return uimaResource;
@@ -94,7 +98,6 @@ public class UimaTokenizerFactory implements TokenizerFactory {
 	public static AnalysisEngine defaultAnalysisEngine()  {
 		try {
 			if(defaultAnalysisEngine == null)
-
 				defaultAnalysisEngine =  AnalysisEngineFactory.createEngine(
 						AnalysisEngineFactory.createEngineDescription(
 								SentenceAnnotator.getDescription(),
@@ -112,10 +115,20 @@ public class UimaTokenizerFactory implements TokenizerFactory {
 		throw new UnsupportedOperationException();
 	}
 
-    @Override
-    public void setTokenPreProcessor(TokenPreProcess preProcessor) {
-        this.preProcess = preProcessor;
-    }
+	@Override
+	public void setTokenPreProcessor(TokenPreProcess preProcessor) {
+		this.preProcess = preProcessor;
+	}
+
+	/**
+	 * Returns TokenPreProcessor set for this TokenizerFactory instance
+	 *
+	 * @return TokenPreProcessor instance, or null if no preprocessor was defined
+	 */
+	@Override
+	public TokenPreProcess getTokenPreProcessor() {
+		return preProcess;
+	}
 
 
 }

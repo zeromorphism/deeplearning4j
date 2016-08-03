@@ -1,13 +1,31 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.datasets.iterator.impl;
+
+import lombok.Getter;
+import org.nd4j.linalg.dataset.DataSet;
+import org.nd4j.linalg.dataset.api.DataSetPreProcessor;
+import org.nd4j.linalg.dataset.api.iterator.DataSetIterator;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-
-
-import org.deeplearning4j.datasets.iterator.DataSetIterator;
-import org.deeplearning4j.datasets.iterator.DataSetPreProcessor;
-import org.nd4j.linalg.dataset.DataSet;
 
 /**
  * Wraps a data applyTransformToDestination collection
@@ -25,7 +43,7 @@ public class ListDataSetIterator implements DataSetIterator {
 	private int curr = 0;
 	private int batch = 10;
 	private List<DataSet> list;
-	private DataSetPreProcessor preProcessor;
+	@Getter private DataSetPreProcessor preProcessor;
 
 	public ListDataSetIterator(Collection<DataSet> coll,int batch) {
 		list = new ArrayList<>(coll);
@@ -73,6 +91,11 @@ public class ListDataSetIterator implements DataSetIterator {
 	}
 
 	@Override
+	public boolean resetSupported(){
+		return true;
+	}
+
+	@Override
 	public synchronized void reset() {
 		curr = 0;
 	}
@@ -92,17 +115,18 @@ public class ListDataSetIterator implements DataSetIterator {
 		return list.size();
 	}
 
-    /**
-     * Set a pre processor
-     *
-     * @param preProcessor a pre processor to set
-     */
     @Override
-    public void setPreProcessor(DataSetPreProcessor preProcessor) {
-       this.preProcessor = preProcessor;
+    public void setPreProcessor(org.nd4j.linalg.dataset.api.DataSetPreProcessor preProcessor) {
+        this.preProcessor = (DataSetPreProcessor) preProcessor;
     }
 
-    @Override
+	@Override
+	public List<String> getLabels() {
+		return null;
+	}
+
+
+	@Override
 	public DataSet next(int num) {
 		int end = curr + num;
 
@@ -114,8 +138,12 @@ public class ListDataSetIterator implements DataSetIterator {
 		}
 		
 		DataSet d = DataSet.merge(r);
-        if(preProcessor != null)
-            preProcessor.preProcess(d);
+        if(preProcessor != null) {
+        	if (!d.isPreProcessed()) {
+				preProcessor.preProcess(d);
+				d.markAsPreProcessed();
+			}
+		}
 		return d;
 	}
 

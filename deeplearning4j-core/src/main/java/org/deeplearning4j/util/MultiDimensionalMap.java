@@ -1,3 +1,21 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.util;
 
 import org.deeplearning4j.berkeley.Pair;
@@ -22,7 +40,7 @@ public class MultiDimensionalMap<K,T,V>  implements Serializable  {
      * @return
      */
     public static <K,T,V>  MultiDimensionalMap<K,T,V> newThreadSafeTreeBackedMap() {
-        return new MultiDimensionalMap<K,T,V>(new ConcurrentSkipListMap<Pair<K,T>,V>());
+        return new MultiDimensionalMap<>(new ConcurrentSkipListMap<Pair<K,T>,V>());
     }
 
     /**
@@ -226,7 +244,7 @@ public class MultiDimensionalMap<K,T,V>  implements Serializable  {
     /**
      * Copies all of the mappings from the specified map to this map
      * (optional operation).  The effect of this call is equivalent to that
-     * of calling {@link #put(Object, Object) put(k, v)} on this map once
+     * of calling {@link Map<>#put(k, v)} on this map once
      * for each mapping from key <tt>k</tt> to value <tt>v</tt> in the
      * specified map.  The behavior of this operation is undefined if the
      * specified map is modified while the operation is in progress.
@@ -339,9 +357,8 @@ public class MultiDimensionalMap<K,T,V>  implements Serializable  {
 
         MultiDimensionalMap that = (MultiDimensionalMap) o;
 
-        if (backedMap != null ? !backedMap.equals(that.backedMap) : that.backedMap != null) return false;
+        return !(backedMap != null ? !backedMap.equals(that.backedMap) : that.backedMap != null);
 
-        return true;
     }
 
     

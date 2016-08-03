@@ -1,25 +1,38 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.text.corpora.sentiwordnet;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.Serializable;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Set;
-import java.util.Vector;
-
+import com.google.common.collect.Sets;
 import org.apache.uima.analysis_engine.AnalysisEngine;
 import org.apache.uima.cas.CAS;
 import org.apache.uima.cas.CASException;
 import org.apache.uima.fit.util.JCasUtil;
+import org.datavec.api.util.ClassPathResource;
 import org.cleartk.token.type.Sentence;
 import org.cleartk.token.type.Token;
 import org.deeplearning4j.text.tokenization.tokenizerfactory.UimaTokenizerFactory;
-import org.springframework.core.io.ClassPathResource;
 
-import com.google.common.collect.Sets;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.Serializable;
+import java.util.*;
 /**
  * Based on SentiWordnet
  * @author Adam Gibson
@@ -45,13 +58,13 @@ public class SWN3 implements Serializable {
 	
 	public SWN3(String sentiWordNetPath) {
 
-		_dict = new HashMap<String, Double>();
-		HashMap<String, Vector<Double>> _temp = new HashMap<String, Vector<Double>>();
+		_dict = new HashMap<>();
+		HashMap<String, List<Double>> _temp = new HashMap<>();
 
 		ClassPathResource resource = new ClassPathResource(sentiWordNetPath);
-
+		BufferedReader csv = null;
 		try{
-			BufferedReader csv =  new BufferedReader(new InputStreamReader(resource.getInputStream()));
+			csv =  new BufferedReader(new InputStreamReader(resource.getInputStream()));
 			String line = "";           
 			while((line = csv.readLine()) != null) {
 				if(line.isEmpty())
@@ -70,19 +83,19 @@ public class SWN3 implements Serializable {
 					w_n[0] += "#"+data[0];
 					int index = Integer.parseInt(w_n[1])-1;
 					if(_temp.containsKey(w_n[0])) {
-						Vector<Double> v = _temp.get(w_n[0]);
-						if(index>v.size())
-							for(int i = v.size();i<index; i++)
-								v.add(0.0);
-						v.add(index, score);
-						_temp.put(w_n[0], v);
+						List<Double> l = _temp.get(w_n[0]);
+						if(index>l.size())
+							for(int i = l.size();i<index; i++)
+								l.add(0.0);
+						l.add(index, score);
+						_temp.put(w_n[0], l);
 					}
 					else {
-						Vector<Double> v = new Vector<Double>();
+						List<Double> l = new ArrayList<>();
 						for(int i = 0;i<index; i++)
-							v.add(0.0);
-						v.add(index, score);
-						_temp.put(w_n[0], v);
+							l.add(0.0);
+						l.add(index, score);
+						_temp.put(w_n[0], l);
 					}
 				}
 			}
@@ -90,13 +103,13 @@ public class SWN3 implements Serializable {
 			
 			Set<String> temp = _temp.keySet();
 			for (Iterator<String> iterator = temp.iterator(); iterator.hasNext(); ) {
-				String word = (String) iterator.next();
-				Vector<Double> v = _temp.get(word);
+				String word = iterator.next();
+				List<Double> l = _temp.get(word);
 				double score = 0.0;
 				double sum = 0.0;
-				for(int i = 0; i < v.size(); i++)
-					score += ((double)1/(double)(i+1))*v.get(i);
-				for(int i = 1; i<=v.size(); i++)
+				for(int i = 0; i < l.size(); i++)
+					score += ((double)1/(double)(i+1))*l.get(i);
+				for(int i = 1; i<=l.size(); i++)
 					sum += (double)1/(double)i;
 				score /= sum;
 				_dict.put(word, score);
@@ -104,7 +117,15 @@ public class SWN3 implements Serializable {
 		}
 		catch(Exception e) {
 			throw new RuntimeException(e);
-		}        
+		} finally {
+			if (csv != null) {
+				try {
+					csv.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+		}
 	}
 
 	
@@ -157,7 +178,7 @@ public class SWN3 implements Serializable {
 
 	public double scoreTokens(List<Token> tokens) {
 		double totalScore = 0.0;
-		Set<String> negativeWords = new HashSet<String>();
+		Set<String> negativeWords = new HashSet<>();
 		double scoreForSentence = 0.0;
 		for(Token token : tokens) {
 			scoreForSentence += extract(token.getCoveredText().toLowerCase());

@@ -1,6 +1,24 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.aws.ec2;
 
-import com.amazonaws.regions.*;
+import com.amazonaws.regions.Regions;
 import com.amazonaws.services.ec2.AmazonEC2;
 import com.amazonaws.services.ec2.model.*;
 import org.deeplearning4j.aws.s3.BaseS3;
@@ -26,7 +44,7 @@ public class Ec2BoxCreator extends BaseS3 {
 	private String securityGroupId;
 	private String keyPair;
     private Regions regions = Regions.DEFAULT_REGION;
-	private static Logger log = LoggerFactory.getLogger(Ec2BoxCreator.class);
+	private static final Logger log = LoggerFactory.getLogger(Ec2BoxCreator.class);
 	
 	//centos
 	public final static String DEFAULT_AMI = "ami-8997afe0";
@@ -73,7 +91,7 @@ public class Ec2BoxCreator extends BaseS3 {
 		launchSpecification.setInstanceType("t1.micro");
 
 		// Add the security group to the request.
-		List<String> securityGroups = new ArrayList<String>();
+		List<String> securityGroups = new ArrayList<>();
 		securityGroups.add("GettingStartedGroup");
 		launchSpecification.setSecurityGroups(securityGroups);
 

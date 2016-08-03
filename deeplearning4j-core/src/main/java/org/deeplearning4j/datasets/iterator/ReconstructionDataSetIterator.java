@@ -1,7 +1,30 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.datasets.iterator;
 
 
+import lombok.Getter;
 import org.nd4j.linalg.dataset.DataSet;
+import org.nd4j.linalg.dataset.api.DataSetPreProcessor;
+import org.nd4j.linalg.dataset.api.iterator.DataSetIterator;
+
+import java.util.List;
 
 /**
  * Wraps a data applyTransformToDestination iterator setting the first (feature matrix) as
@@ -12,7 +35,7 @@ import org.nd4j.linalg.dataset.DataSet;
 public class ReconstructionDataSetIterator implements DataSetIterator {
 
     private DataSetIterator iter;
-    private DataSetPreProcessor preProcessor;
+    @Getter private DataSetPreProcessor preProcessor;
     public ReconstructionDataSetIterator(DataSetIterator iter) {
         this.iter = iter;
     }
@@ -61,6 +84,11 @@ public class ReconstructionDataSetIterator implements DataSetIterator {
         return iter.totalOutcomes();
     }
 
+    @Override
+    public boolean resetSupported(){
+        return iter.resetSupported();
+    }
+
     /**
      * Resets the iterator back to the beginning
      */
@@ -99,16 +127,16 @@ public class ReconstructionDataSetIterator implements DataSetIterator {
         return iter.numExamples();
     }
 
-    /**
-     * Set a pre processor
-     *
-     * @param preProcessor a pre processor to set
-     */
     @Override
     public void setPreProcessor(DataSetPreProcessor preProcessor) {
         this.preProcessor = preProcessor;
-
     }
+
+    @Override
+    public List<String> getLabels() {
+        return null;
+    }
+
 
     /**
      * Returns {@code true} if the iteration has more elements.

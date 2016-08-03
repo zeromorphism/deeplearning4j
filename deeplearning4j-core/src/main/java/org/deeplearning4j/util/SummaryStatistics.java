@@ -1,3 +1,21 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.util;
 
 
@@ -12,17 +30,12 @@ public class SummaryStatistics {
 
     private SummaryStatistics() {}
 
-
-
     private SummaryStatistics(INDArray mean,INDArray sum,INDArray min,INDArray max) {
         this.mean = (double) mean.element();
         this.sum = (double) sum.element();
         this.min = (double) min.element();
         this.max = (double) max.element();
     }
-
-
-
 
     private SummaryStatistics(double mean,double sum,double min,double max) {
         this.mean = mean;
@@ -33,11 +46,13 @@ public class SummaryStatistics {
 
 
     public static String summaryStatsString(INDArray d) {
-        return new SummaryStatistics(d.mean(Integer.MAX_VALUE),d.sum(Integer.MAX_VALUE),d.min(Integer.MAX_VALUE),d.max(Integer.MAX_VALUE)).toString();
+        return new SummaryStatistics(d.mean(Integer.MAX_VALUE),d.sum(Integer.MAX_VALUE),
+            d.min(Integer.MAX_VALUE),d.max(Integer.MAX_VALUE)).toString();
     }
 
     public static SummaryStatistics summaryStats(INDArray d) {
-         return new SummaryStatistics(d.mean(Integer.MAX_VALUE),d.sum(Integer.MAX_VALUE),d.min(Integer.MAX_VALUE),d.max(Integer.MAX_VALUE));
+        return new SummaryStatistics(d.mean(Integer.MAX_VALUE),d.sum(Integer.MAX_VALUE),
+            d.min(Integer.MAX_VALUE),d.max(Integer.MAX_VALUE));
     }
 
 

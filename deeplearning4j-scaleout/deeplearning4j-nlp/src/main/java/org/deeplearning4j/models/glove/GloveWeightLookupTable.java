@@ -1,19 +1,34 @@
-package org.deeplearning4j.models.glove;
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
 
+package org.deeplearning4j.models.glove;
 
 
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.LineIterator;
-import org.apache.commons.math3.random.MersenneTwister;
-import org.apache.commons.math3.random.RandomGenerator;
 import org.deeplearning4j.models.embeddings.inmemory.InMemoryLookupTable;
-import org.deeplearning4j.models.word2vec.VocabWord;
+import org.deeplearning4j.models.sequencevectors.sequence.SequenceElement;
 import org.deeplearning4j.models.word2vec.Word2Vec;
 import org.deeplearning4j.models.word2vec.wordstore.VocabCache;
 import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.api.rng.Random;
 import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.learning.AdaGrad;
-
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -26,7 +41,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * @author Adam Gibson
  */
-public class GloveWeightLookupTable extends InMemoryLookupTable {
+// Deprecated due to logic being pulled off WeightLookupTable classes into LearningAlgorithm interfaces for better code.
+@Deprecated
+public class GloveWeightLookupTable<T extends SequenceElement> extends InMemoryLookupTable<T> {
 
 
     private AdaGrad weightAdaGrad;
@@ -37,7 +54,7 @@ public class GloveWeightLookupTable extends InMemoryLookupTable {
     private double maxCount = 100;
 
 
-    public GloveWeightLookupTable(VocabCache vocab, int vectorLength, boolean useAdaGrad, double lr, RandomGenerator gen, double negative, double xMax,double maxCount) {
+    public GloveWeightLookupTable(VocabCache<T> vocab, int vectorLength, boolean useAdaGrad, double lr, Random gen, double negative, double xMax,double maxCount) {
         super(vocab, vectorLength, useAdaGrad, lr, gen, negative);
         this.xMax = xMax;
         this.maxCount = maxCount;
@@ -46,27 +63,25 @@ public class GloveWeightLookupTable extends InMemoryLookupTable {
     @Override
     public void resetWeights(boolean reset) {
         if(rng == null)
-            this.rng = new MersenneTwister(seed);
+            this.rng = Nd4j.getRandom();
 
         //note the +2 which is the unk vocab word and the bias
-        if(syn0 == null || syn0 != null && reset) {
+        if(syn0 == null || reset) {
             syn0 = Nd4j.rand(new int[]{vocab.numWords() + 1, vectorLength}, rng).subi(0.5).divi((double) vectorLength);
             INDArray randUnk = Nd4j.rand(1,vectorLength,rng).subi(0.5).divi(vectorLength);
-            putVector(Word2Vec.UNK, randUnk);
+            putVector(Word2Vec.DEFAULT_UNK, randUnk);
         }
-        if(weightAdaGrad == null || weightAdaGrad != null && reset) {
-            weightAdaGrad = new AdaGrad(new int[]{vocab.numWords() + 1, vectorLength});
-            weightAdaGrad.setMasterStepSize(lr.get());
+        if(weightAdaGrad == null || reset) {
+            weightAdaGrad = new AdaGrad(new int[]{vocab.numWords() + 1, vectorLength}, lr.get());
         }
 
 
         //right after unknown
-        if(bias == null || bias != null && reset)
+        if(bias == null || reset)
             bias = Nd4j.create(syn0.rows());
 
-        if(biasAdaGrad == null || biasAdaGrad != null && reset) {
-            biasAdaGrad = new AdaGrad(bias.shape());
-            biasAdaGrad.setMasterStepSize(lr.get());
+        if(biasAdaGrad == null || reset) {
+            biasAdaGrad = new AdaGrad(bias.shape(), lr.get());
         }
 
 
@@ -87,14 +102,14 @@ public class GloveWeightLookupTable extends InMemoryLookupTable {
      * @param w2 the second word
      * @param score the weight learned for the particular co occurrences
      */
-    public   double iterateSample(VocabWord w1, VocabWord w2,double score) {
+    public   double iterateSample(T w1, T w2,double score) {
         INDArray w1Vector = syn0.slice(w1.getIndex());
         INDArray w2Vector = syn0.slice(w2.getIndex());
         //prediction: input + bias
         if(w1.getIndex() < 0 || w1.getIndex() >= syn0.rows())
-            throw new IllegalArgumentException("Illegal index for word " + w1.getWord());
+            throw new IllegalArgumentException("Illegal index for word " + w1.getLabel());
         if(w2.getIndex() < 0 || w2.getIndex() >= syn0.rows())
-            throw new IllegalArgumentException("Illegal index for word " + w2.getWord());
+            throw new IllegalArgumentException("Illegal index for word " + w2.getLabel());
 
 
         //w1 * w2 + bias
@@ -113,8 +128,6 @@ public class GloveWeightLookupTable extends InMemoryLookupTable {
         //the gradient of the OPPOSITE word
         //for adagrad we will use the index of the word passed in
         //for the gradient calculation we will use the context vector
-
-
         update(w1,w1Vector,w2Vector,gradient);
         update(w2,w2Vector,w1Vector,gradient);
         return fDiff;
@@ -124,7 +137,7 @@ public class GloveWeightLookupTable extends InMemoryLookupTable {
     }
 
 
-    private void update(VocabWord w1,INDArray wordVector,INDArray contextVector,double gradient) {
+    private void update(T w1,INDArray wordVector,INDArray contextVector,double gradient) {
         //gradient for word vectors
         INDArray grad1 =  contextVector.mul(gradient);
         INDArray update = weightAdaGrad.getGradient(grad1,w1.getIndex(),syn0.shape());
@@ -142,36 +155,12 @@ public class GloveWeightLookupTable extends InMemoryLookupTable {
         return weightAdaGrad;
     }
 
-    public void setWeightAdaGrad(AdaGrad weightAdaGrad) {
-        this.weightAdaGrad = weightAdaGrad;
-    }
 
     public AdaGrad getBiasAdaGrad() {
         return biasAdaGrad;
     }
 
-    public void setBiasAdaGrad(AdaGrad biasAdaGrad) {
-        this.biasAdaGrad = biasAdaGrad;
-    }
 
-    /**
-     * Load the weights in raw format
-     * @param is the input stream to read from for the weights
-     * @param vocab the vocab for the lookuptable
-     * @param vectorLength the length of each row
-     * @return the lookup table
-     * @throws IOException
-     */
-    public static GloveWeightLookupTable loadRawArray(InputStream is,VocabCache vocab,int vectorLength) throws IOException {
-        GloveWeightLookupTable ret = new GloveWeightLookupTable.Builder()
-                .cache(vocab).vectorLength(vectorLength)
-                .build();
-        INDArray syn0 = Nd4j.readTxt(is," ");
-        ret.setSyn0(syn0);
-        ret.resetWeights(false);
-        return ret;
-
-    }
 
     /**
      * Load a glove model from an input stream.
@@ -182,7 +171,7 @@ public class GloveWeightLookupTable extends InMemoryLookupTable {
      * @return the loaded model
      * @throws java.io.IOException if one occurs
      */
-    public static GloveWeightLookupTable load(InputStream is,VocabCache vocab) throws IOException {
+    public static GloveWeightLookupTable load(InputStream is,VocabCache<? extends SequenceElement> vocab) throws IOException {
         LineIterator iter = IOUtils.lineIterator(is, "UTF-8");
         GloveWeightLookupTable glove = null;
         Map<String,float[]> wordVectors = new HashMap<>();
@@ -201,7 +190,7 @@ public class GloveWeightLookupTable extends InMemoryLookupTable {
 
             if(word.isEmpty())
                 continue;
-            float[] read = read(split,glove.getVectorLength());
+            float[] read = read(split,glove.layerSize());
             if(read.length < 1)
                 continue;
 
@@ -224,10 +213,12 @@ public class GloveWeightLookupTable extends InMemoryLookupTable {
     }
 
     private static INDArray weights(GloveWeightLookupTable glove,Map<String,float[]> data,VocabCache vocab) {
-        INDArray ret = Nd4j.create(data.size(),glove.getVectorLength());
-        for(String key : data.keySet()) {
-            INDArray row = Nd4j.create(Nd4j.createBuffer(data.get(key)));
-            if(row.length() != glove.getVectorLength())
+        INDArray ret = Nd4j.create(data.size(),glove.layerSize());
+
+        for (Map.Entry<String, float[]> entry : data.entrySet()) {
+            String key = entry.getKey();
+            INDArray row = Nd4j.create(Nd4j.createBuffer(entry.getValue()));
+            if(row.length() != glove.layerSize())
                 continue;
             if(vocab.indexOf(key) >= data.size())
                 continue;
@@ -249,7 +240,7 @@ public class GloveWeightLookupTable extends InMemoryLookupTable {
 
 
     @Override
-    public void iterateSample(VocabWord w1, VocabWord w2, AtomicLong nextRandom, double alpha) {
+    public void iterateSample(T w1, T w2, AtomicLong nextRandom, double alpha) {
         throw new UnsupportedOperationException();
 
     }
@@ -278,66 +269,66 @@ public class GloveWeightLookupTable extends InMemoryLookupTable {
         this.bias = bias;
     }
 
-    public static class Builder extends  InMemoryLookupTable.Builder {
+    public static class Builder<T extends SequenceElement> extends  InMemoryLookupTable.Builder<T> {
         private double xMax = 0.75;
         private double maxCount = 100;
 
 
-        public Builder maxCount(double maxCount) {
+        public Builder<T> maxCount(double maxCount) {
             this.maxCount = maxCount;
             return this;
         }
 
 
-        public Builder xMax(double xMax) {
+        public Builder<T> xMax(double xMax) {
             this.xMax = xMax;
             return this;
         }
 
         @Override
-        public Builder cache(VocabCache vocab) {
+        public Builder<T> cache(VocabCache<T> vocab) {
             super.cache(vocab);
             return this;
         }
 
         @Override
-        public Builder negative(double negative) {
+        public Builder<T> negative(double negative) {
             super.negative(negative);
             return this;
         }
 
         @Override
-        public Builder vectorLength(int vectorLength) {
+        public Builder<T> vectorLength(int vectorLength) {
             super.vectorLength(vectorLength);
             return this;
         }
 
         @Override
-        public Builder useAdaGrad(boolean useAdaGrad) {
+        public Builder<T> useAdaGrad(boolean useAdaGrad) {
             super.useAdaGrad(useAdaGrad);
             return this;
         }
 
         @Override
-        public Builder lr(double lr) {
+        public Builder<T> lr(double lr) {
             super.lr(lr);
             return this;
         }
 
         @Override
-        public Builder gen(RandomGenerator gen) {
+        public Builder<T> gen(Random gen) {
             super.gen(gen);
             return this;
         }
 
         @Override
-        public Builder seed(long seed) {
+        public Builder<T> seed(long seed) {
             super.seed(seed);
             return this;
         }
 
-        public GloveWeightLookupTable build() {
-            return new GloveWeightLookupTable(vocabCache,vectorLength,useAdaGrad,lr,gen,negative,xMax,maxCount);
+        public GloveWeightLookupTable<T> build() {
+            return new GloveWeightLookupTable<>(vocabCache, vectorLength, useAdaGrad, lr, gen, negative, xMax, maxCount);
         }
     }
 

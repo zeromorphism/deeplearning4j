@@ -1,23 +1,35 @@
+/*
+ *
+ *  * Copyright 2015 Skymind,Inc.
+ *  *
+ *  *    Licensed under the Apache License, Version 2.0 (the "License");
+ *  *    you may not use this file except in compliance with the License.
+ *  *    You may obtain a copy of the License at
+ *  *
+ *  *        http://www.apache.org/licenses/LICENSE-2.0
+ *  *
+ *  *    Unless required by applicable law or agreed to in writing, software
+ *  *    distributed under the License is distributed on an "AS IS" BASIS,
+ *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  *    See the License for the specific language governing permissions and
+ *  *    limitations under the License.
+ *
+ */
+
 package org.deeplearning4j.aws.s3.reader;
 
-import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.model.*;
+import com.amazonaws.services.s3.transfer.MultipleFileDownload;
+import com.amazonaws.services.s3.transfer.TransferManager;
+import org.apache.commons.io.IOUtils;
+import org.deeplearning4j.aws.s3.BaseS3;
+
+import java.io.*;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-import org.apache.commons.io.IOUtils;
-import org.deeplearning4j.aws.s3.BaseS3;
-
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.model.Bucket;
-import com.amazonaws.services.s3.model.ObjectListing;
-import com.amazonaws.services.s3.model.S3Object;
-import com.amazonaws.services.s3.model.S3ObjectSummary;
 /**
  * Downloads files from S3
  * @author Adam Gibson
@@ -26,14 +38,35 @@ import com.amazonaws.services.s3.model.S3ObjectSummary;
 public class S3Downloader extends BaseS3 {
 
 
-	
-	
+    /**
+     * Return the keys for a bucket
+     * @param bucket the bucket to get the keys for
+     * @return the bucket's keys
+     */
+    public List<String> keysForBucket(String bucket) {
+        AmazonS3 s3 = getClient();
+        List<String> ret = new ArrayList<>();
+        ListObjectsRequest listObjectsRequest = new ListObjectsRequest()
+                .withBucketName(bucket);
+        ObjectListing objectListing;
+
+        do {
+            objectListing = s3.listObjects(listObjectsRequest);
+            for (S3ObjectSummary objectSummary :  objectListing.getObjectSummaries()) {
+                ret.add(objectSummary.getKey());
+            }
+            listObjectsRequest.setMarker(objectListing.getNextMarker());
+        } while (objectListing.isTruncated());
+
+        return ret;
+    }
+
 	/**
 	 * Returns the list of buckets in s3
 	 * @return the list of buckets
 	 */
 	public List<String> buckets() {
-		List<String> ret = new ArrayList<String>();
+		List<String> ret = new ArrayList<>();
 		AmazonS3 s3 = getClient();
 		List<Bucket> buckets = s3.listBuckets();
 		for(Bucket b : buckets)
@@ -138,5 +171,11 @@ public class S3Downloader extends BaseS3 {
 		is.close();
 		obj.close();
 	}
+
+	public MultipleFileDownload downloadFolder(String bucketName, String keyPrefix, File folderPath) {
+		TransferManager transfer = new TransferManager(getClient());
+		return transfer.downloadDirectory(bucketName, keyPrefix, folderPath);
+	}
+
 
 }
