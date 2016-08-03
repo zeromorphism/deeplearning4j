@@ -19,17 +19,17 @@
 package org.deeplearning4j.util;
 
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
-import java.util.Set;
-
 import org.apache.commons.math3.linear.CholeskyDecomposition;
 import org.apache.commons.math3.linear.NonSquareMatrixException;
 import org.apache.commons.math3.linear.RealMatrix;
 import org.apache.commons.math3.random.RandomGenerator;
 import org.apache.commons.math3.util.FastMath;
 import org.deeplearning4j.berkeley.Counter;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.Set;
 
 
 
@@ -206,8 +206,8 @@ public class MathUtils  {
     public static double stringSimilarity(String...strings) {
         if(strings==null)
             return 0;
-        Counter<String> counter = new Counter<String>();
-        Counter<String> counter2 = new Counter<String>();
+        Counter<String> counter = new Counter<>();
+        Counter<String> counter2 = new Counter<>();
 
         for(int i = 0; i < strings[0].length(); i++)
             counter.incrementCount(String.valueOf(strings[0].charAt(i)), 1.0);
@@ -256,7 +256,10 @@ public class MathUtils  {
      * @return log(10) (totalDocs/numTImesWordAppearedInADocument)
      */
     public static double idf(double totalDocs,double numTimesWordAppearedInADocument) {
-        return totalDocs > 0 ? Math.log10(totalDocs/numTimesWordAppearedInADocument) : 0;
+        //return totalDocs > 0 ? Math.log10(totalDocs/numTimesWordAppearedInADocument) : 0;
+        if (totalDocs == 0) return 0;
+        double idf = Math.log10(totalDocs / numTimesWordAppearedInADocument);
+        return idf;
     }
 
     /**
@@ -264,17 +267,20 @@ public class MathUtils  {
      * @param count the count of a word or character in a given string or document
      * @return 1+ log(10) count
      */
-    public static double tf(int count) {
-        return count > 0 ? 1 + Math.log10(count) : 0;
+    public static double tf(int count, int documentLength) {
+        //return count > 0 ? 1 + Math.log10(count) : 0
+        double tf = ((double) count/ documentLength);
+        return tf;
     }
     /**
      * Return td * idf
-     * @param td the term frequency (assumed calculated)
+     * @param tf the term frequency (assumed calculated)
      * @param idf inverse document frequency (assumed calculated)
      * @return td * idf
      */
-    public static double tfidf(double td,double idf) {
-        return td * idf;
+    public static double tfidf(double tf,double idf) {
+//        System.out.println("TF-IDF Value: " + (tf * idf));
+        return tf * idf;
     }
 
     private static int charForLetter(char c) {
@@ -496,7 +502,7 @@ public class MathUtils  {
      * This returns the product of all numbers in the given array.
      * @param nums the numbers to multiply over
      * @return the product of all numbers in the array, or 0
-     * if the length is or or nums i null
+     * if the length is or nums i null
      */
     public static double times(double[] nums) {
         if(nums==null || nums.length==0) return 0;
@@ -557,7 +563,7 @@ public class MathUtils  {
     public static List<double[]> coordSplit(double[] vector) {
 
         if(vector==null) return null;
-        List<double[]> ret = new ArrayList<double[]>();
+        List<double[]> ret = new ArrayList<>();
 		/* x coordinates */
         double[] xVals = new double[vector.length/2];
 		/* y coordinates */
@@ -729,11 +735,11 @@ public class MathUtils  {
      * @return the root means squared error for two data sets
      */
     public static double rootMeansSquaredError(double[] real,double[] predicted) {
-        double ret=1/real.length;
+        double ret= 0.0;
         for(int i=0;i<real.length;i++) {
             ret+=Math.pow((real[i]-predicted[i]), 2);
         }
-        return Math.sqrt(ret);
+        return Math.sqrt(ret / real.length);
     }//end rootMeansSquaredError
     /**
      * This returns the entropy (information gain, or uncertainty of a random variable).
@@ -741,9 +747,7 @@ public class MathUtils  {
      * @return the entropy of the given vector
      */
     public static double entropy(double[] vector) {
-        if(vector==null)
-            return 0;
-        else if(vector.length < 1)
+        if(vector==null || vector.length < 1)
             return 0;
         else {
             double ret=0;
@@ -771,7 +775,7 @@ public class MathUtils  {
      * @return an adjusted r^2 for degrees of freedom
      */
     public static double adjustedrSquared(double rSquared,int numRegressors,int numDataPoints) {
-        double divide=(numDataPoints -1)/(numDataPoints - numRegressors -1);
+        double divide = (numDataPoints - 1.0) / (numDataPoints - numRegressors - 1.0);
         double rSquaredDiff=1-rSquared;
         return 1-(rSquaredDiff *divide );
     }
@@ -1177,11 +1181,11 @@ public class MathUtils  {
     }//end distanceFinderZValue
 
     /**
-     * This returns the distance distance of two vectors
+     * This returns the distance of two vectors
      * sum(i=1,n)   (q_i - p_i)^2
      * @param p the first vector
      * @param q the second vector
-     * @return the distance distance between two vectors
+     * @return the distance between two vectors
      */
     public static double euclideanDistance(double[] p,double[]  q) {
 
@@ -1195,11 +1199,11 @@ public class MathUtils  {
 
     }//end euclideanDistance
     /**
-     * This returns the distance distance of two vectors
+     * This returns the distance of two vectors
      * sum(i=1,n)   (q_i - p_i)^2
      * @param p the first vector
      * @param q the second vector
-     * @return the distance distance between two vectors
+     * @return the distance between two vectors
      */
     public static double euclideanDistance(float[] p,float[]  q) {
 
@@ -1290,5 +1294,19 @@ public class MathUtils  {
 
     public static double randomDoubleBetween(double begin,double end) {
         return	begin + (Math.random() * ((end - begin)));
+    }
+
+    public static void shuffleArray(int[] array, long rngSeed) {
+        shuffleArray(array,new Random(rngSeed));
+    }
+
+    public static void shuffleArray(int[] array, Random rng ){
+        //https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#The_modern_algorithm
+        for(int i=array.length-1; i>0; i-- ){
+            int j = rng.nextInt(i+1);
+            int temp = array[j];
+            array[j] = array[i];
+            array[i] = temp;
+        }
     }
 }

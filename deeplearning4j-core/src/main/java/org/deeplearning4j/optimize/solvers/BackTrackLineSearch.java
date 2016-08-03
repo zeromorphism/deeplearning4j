@@ -19,14 +19,12 @@
 package org.deeplearning4j.optimize.solvers;
 
 import org.apache.commons.math3.util.FastMath;
-import static org.nd4j.linalg.ops.transforms.Transforms.*;
-
 import org.deeplearning4j.exception.InvalidStepException;
 import org.deeplearning4j.nn.api.Model;
 import org.deeplearning4j.nn.conf.stepfunctions.NegativeGradientStepFunction;
 import org.deeplearning4j.optimize.api.ConvexOptimizer;
+import org.deeplearning4j.optimize.api.LineOptimizer;
 import org.deeplearning4j.optimize.api.StepFunction;
-import org.deeplearning4j.optimize.stepfunctions.DefaultStepFunction;
 import org.deeplearning4j.optimize.stepfunctions.NegativeDefaultStepFunction;
 import org.nd4j.linalg.api.blas.Level1;
 import org.nd4j.linalg.api.ndarray.INDArray;
@@ -34,12 +32,13 @@ import org.nd4j.linalg.api.ops.impl.scalar.comparison.ScalarSetValue;
 import org.nd4j.linalg.api.ops.impl.transforms.comparison.Eps;
 import org.nd4j.linalg.api.shape.Shape;
 import org.nd4j.linalg.factory.Nd4j;
-import org.deeplearning4j.optimize.api.LineOptimizer;
 import org.nd4j.linalg.indexing.BooleanIndexing;
 import org.nd4j.linalg.indexing.conditions.Conditions;
 import org.nd4j.linalg.indexing.functions.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.nd4j.linalg.ops.transforms.Transforms.abs;
 
 
 //"Line Searches and Backtracking", p385, "Numeric Recipes in C"
@@ -96,7 +95,6 @@ public class BackTrackLineSearch implements LineOptimizer {
      */
     public BackTrackLineSearch(Model optimizable, ConvexOptimizer optimizer) {
         this(optimizable, new NegativeDefaultStepFunction(), optimizer);
-        log.warn("Objective function automatically set to minimize. Set stepFunction in neural net configuration to change default settings.");
     }
 
 
@@ -215,7 +213,7 @@ public class BackTrackLineSearch implements LineOptimizer {
                 throw new IllegalArgumentException("Current step == oldStep");
 
             // step
-            candidateParameters = Shape.toOffsetZeroCopy(parameters,'f');   //Convention: f order for params and gradient flattening
+            candidateParameters = parameters.dup('f');
             stepFunction.step(candidateParameters, searchDirection, step);
             oldStep = step;
 
@@ -236,10 +234,7 @@ public class BackTrackLineSearch implements LineOptimizer {
             log.debug("Model score after step = {}", score);
 
             //Score best step size for use if we terminate on maxIterations
-            if( minObjectiveFunction && score < bestScore ){
-            	bestScore = score;
-            	bestStepSize = step;
-            } else if( !minObjectiveFunction && score > bestScore ){
+            if( (minObjectiveFunction && score < bestScore) || (!minObjectiveFunction && score > bestScore)) {
             	bestScore = score;
             	bestStepSize = step;
             }

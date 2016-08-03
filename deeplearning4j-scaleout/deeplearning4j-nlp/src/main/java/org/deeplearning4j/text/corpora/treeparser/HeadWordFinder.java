@@ -18,16 +18,9 @@
 
 package org.deeplearning4j.text.corpora.treeparser;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-
 import org.deeplearning4j.nn.layers.feedforward.autoencoder.recursive.Tree;
+
+import java.util.*;
 
 public class HeadWordFinder  {
 
@@ -235,7 +228,7 @@ public class HeadWordFinder  {
     }
 
     int findHead3(String lhs, List<String> rhss) {
-        StringBuffer keyBuffer = new StringBuffer(lhs + " ->");
+        StringBuilder keyBuffer = new StringBuilder(lhs + " ->");
         for (String rhs : rhss)
             keyBuffer.append(" " + rhs);
         String key = keyBuffer.toString();

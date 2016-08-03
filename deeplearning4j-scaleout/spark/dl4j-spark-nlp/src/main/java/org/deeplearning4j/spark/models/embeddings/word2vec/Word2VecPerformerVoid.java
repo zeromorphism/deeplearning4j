@@ -31,7 +31,9 @@ import org.nd4j.linalg.factory.Nd4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -314,7 +316,7 @@ public class Word2VecPerformerVoid implements VoidFunction<Pair<List<VocabWord>,
                 //score
                 double f = expTable[idx];
                 //gradient
-                double g = (1 - code - f) * (useAdaGrad ? w1.getGradient(i, alpha) : alpha);
+                double g = (1 - code - f) * (useAdaGrad ? w1.getGradient(i, alpha, this.alpha) : alpha);
 
 
                 if (neu1e.data().dataType() == DataBuffer.Type.DOUBLE) {
@@ -353,11 +355,11 @@ public class Word2VecPerformerVoid implements VoidFunction<Pair<List<VocabWord>,
                 double f = Nd4j.getBlasWrapper().dot(l1, syn1Neg);
                 double g;
                 if (f > MAX_EXP)
-                    g = useAdaGrad ? w1.getGradient(target, (label - 1)) : (label - 1) *  alpha;
+                    g = useAdaGrad ? w1.getGradient(target, (label - 1), this.alpha) : (label - 1) *  alpha;
                 else if (f < -MAX_EXP)
-                    g = label * (useAdaGrad ?  w1.getGradient(target, alpha) : alpha);
+                    g = label * (useAdaGrad ?  w1.getGradient(target, alpha, this.alpha) : alpha);
                 else
-                    g = useAdaGrad ? w1.getGradient(target, label - expTable[(int)((f + MAX_EXP) * (expTable.length / MAX_EXP / 2))]) : (label - expTable[(int)((f + MAX_EXP) * (expTable.length / MAX_EXP / 2))]) *   alpha;
+                    g = useAdaGrad ? w1.getGradient(target, label - expTable[(int)((f + MAX_EXP) * (expTable.length / MAX_EXP / 2))], this.alpha) : (label - expTable[(int)((f + MAX_EXP) * (expTable.length / MAX_EXP / 2))]) *   alpha;
                 if(syn1Neg.data().dataType() == DataBuffer.Type.DOUBLE)
                     Nd4j.getBlasWrapper().axpy(g,neu1e,l1);
                 else

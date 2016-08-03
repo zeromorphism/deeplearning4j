@@ -18,13 +18,12 @@
 
 package org.deeplearning4j.text.tokenization.tokenizerfactory;
 
-import java.io.InputStream;
-
 import org.deeplearning4j.text.tokenization.tokenizer.DefaultStreamTokenizer;
 import org.deeplearning4j.text.tokenization.tokenizer.DefaultTokenizer;
 import org.deeplearning4j.text.tokenization.tokenizer.TokenPreProcess;
 import org.deeplearning4j.text.tokenization.tokenizer.Tokenizer;
-import org.deeplearning4j.text.tokenization.tokenizerfactory.TokenizerFactory;
+
+import java.io.InputStream;
 
 /**
  * Default tokenizer based on string tokenizer or stream tokenizer
@@ -51,6 +50,16 @@ public class DefaultTokenizerFactory implements TokenizerFactory {
     @Override
     public void setTokenPreProcessor(TokenPreProcess preProcessor) {
         this.tokenPreProcess = preProcessor;
+    }
+
+    /**
+     * Returns TokenPreProcessor set for this TokenizerFactory instance
+     *
+     * @return TokenPreProcessor instance, or null if no preprocessor was defined
+     */
+    @Override
+    public TokenPreProcess getTokenPreProcessor() {
+        return tokenPreProcess;
     }
 
 

@@ -18,7 +18,12 @@
 
 package org.deeplearning4j.datasets.iterator;
 
+import lombok.Getter;
 import org.nd4j.linalg.dataset.DataSet;
+import org.nd4j.linalg.dataset.api.DataSetPreProcessor;
+import org.nd4j.linalg.dataset.api.iterator.DataSetIterator;
+
+import java.util.List;
 
 /**
  * A wrapper for a dataset to sample from.
@@ -35,7 +40,7 @@ public class SamplingDataSetIterator implements DataSetIterator {
 	private int batchSize;
 	private int totalNumberSamples;
 	private int numTimesSampled;
-	private DataSetPreProcessor preProcessor;
+	@Getter private DataSetPreProcessor preProcessor;
 
   /**
    *
@@ -84,6 +89,11 @@ public class SamplingDataSetIterator implements DataSetIterator {
 	}
 
 	@Override
+	public boolean resetSupported(){
+		return true;
+	}
+
+	@Override
 	public void reset() {
 		numTimesSampled = 0;
 	}
@@ -108,9 +118,13 @@ public class SamplingDataSetIterator implements DataSetIterator {
         this.preProcessor = (DataSetPreProcessor) preProcessor;
     }
 
+	@Override
+	public List<String> getLabels() {
+		return null;
+	}
 
 
-    @Override
+	@Override
 	public DataSet next(int num) {
 		DataSet ret = sampleFrom.sample(num);
 		numTimesSampled++;

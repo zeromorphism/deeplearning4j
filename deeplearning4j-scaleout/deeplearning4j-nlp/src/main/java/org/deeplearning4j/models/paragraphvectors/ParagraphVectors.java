@@ -1,226 +1,184 @@
-/*
- *
- *  * Copyright 2015 Skymind,Inc.
- *  *
- *  *    Licensed under the Apache License, Version 2.0 (the "License");
- *  *    you may not use this file except in compliance with the License.
- *  *    You may obtain a copy of the License at
- *  *
- *  *        http://www.apache.org/licenses/LICENSE-2.0
- *  *
- *  *    Unless required by applicable law or agreed to in writing, software
- *  *    distributed under the License is distributed on an "AS IS" BASIS,
- *  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  *    See the License for the specific language governing permissions and
- *  *    limitations under the License.
- *
- */
-
 package org.deeplearning4j.models.paragraphvectors;
 
-import akka.actor.ActorSystem;
-import com.google.common.base.Function;
-import org.deeplearning4j.bagofwords.vectorizer.TextVectorizer;
-import org.deeplearning4j.bagofwords.vectorizer.TfidfVectorizer;
+import lombok.Getter;
+import lombok.NonNull;
+import lombok.Setter;
 import org.deeplearning4j.berkeley.Counter;
-import org.deeplearning4j.berkeley.Pair;
 import org.deeplearning4j.models.embeddings.WeightLookupTable;
-import org.deeplearning4j.models.embeddings.inmemory.InMemoryLookupTable;
+import org.deeplearning4j.models.embeddings.learning.ElementsLearningAlgorithm;
+import org.deeplearning4j.models.embeddings.learning.SequenceLearningAlgorithm;
+import org.deeplearning4j.models.embeddings.learning.impl.sequence.DBOW;
+import org.deeplearning4j.models.embeddings.loader.VectorsConfiguration;
+import org.deeplearning4j.models.embeddings.reader.ModelUtils;
+import org.deeplearning4j.models.embeddings.wordvectors.WordVectors;
+import org.deeplearning4j.models.sequencevectors.interfaces.SequenceIterator;
+import org.deeplearning4j.models.sequencevectors.interfaces.VectorsListener;
+import org.deeplearning4j.models.sequencevectors.iterators.AbstractSequenceIterator;
+import org.deeplearning4j.models.sequencevectors.sequence.Sequence;
+import org.deeplearning4j.models.sequencevectors.transformers.impl.SentenceTransformer;
 import org.deeplearning4j.models.word2vec.VocabWord;
 import org.deeplearning4j.models.word2vec.Word2Vec;
 import org.deeplearning4j.models.word2vec.wordstore.VocabCache;
-import org.deeplearning4j.models.word2vec.wordstore.inmemory.InMemoryLookupCache;
-import org.deeplearning4j.parallel.Parallelization;
-import org.deeplearning4j.text.documentiterator.DocumentIterator;
+import org.deeplearning4j.text.documentiterator.*;
+import org.deeplearning4j.text.documentiterator.interoperability.DocumentIteratorConverter;
 import org.deeplearning4j.text.invertedindex.InvertedIndex;
-import org.deeplearning4j.text.invertedindex.LuceneInvertedIndex;
 import org.deeplearning4j.text.sentenceiterator.SentenceIterator;
+import org.deeplearning4j.text.sentenceiterator.interoperability.SentenceIteratorConverter;
+import org.deeplearning4j.text.sentenceiterator.labelaware.LabelAwareSentenceIterator;
 import org.deeplearning4j.text.tokenization.tokenizerfactory.TokenizerFactory;
-import org.deeplearning4j.text.tokenization.tokenizerfactory.UimaTokenizerFactory;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.ops.transforms.Transforms;
 
-import javax.annotation.Nullable;
-import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Paragraph Vectors:
- * [1] Quoc Le and Tomas Mikolov. Distributed Representations of Sentences and Documents. http://arxiv.org/pdf/1405.4053v2.pdf
- .. [2] Tomas Mikolov, Kai Chen, Greg Corrado, and Jeffrey Dean. Efficient Estimation of Word Representations in Vector Space. In Proceedings of Workshop at ICLR, 2013.
- .. [3] Tomas Mikolov, Ilya Sutskever, Kai Chen, Greg Corrado, and Jeffrey Dean. Distributed Representations of Words and Phrases and their Compositionality.
- In Proceedings of NIPS, 2013.
-
- @author Adam Gibson
-
+ * Basic ParagraphVectors (aka Doc2Vec) implementation for DL4j, as wrapper over SequenceVectors
+ *
+ * @author raver119@gmail.com
  */
 public class ParagraphVectors extends Word2Vec {
-    //labels are also vocab words
-    protected Queue<LinkedList<Pair<List<VocabWord>, Collection<VocabWord>>>> jobQueue = new LinkedBlockingDeque<>(10000);
-    protected List<String> labels = new CopyOnWriteArrayList<>();
-    /**
-     * Train the model
-     */
-    @Override
-    public void fit() throws IOException {
-        boolean loaded = buildVocab();
-        //save vocab after building
-        if (!loaded && saveVocab)
-            vocab().saveVocab();
-        if (stopWords == null)
-            readStopWords();
-
-
-
-
-        log.info("Training word2vec multithreaded");
-
-        if (sentenceIter != null)
-            sentenceIter.reset();
-        if (docIter != null)
-            docIter.reset();
-
-
-
-        totalWords = vectorizer.numWordsEncountered();
-        totalWords *= numIterations;
-
-
-
-        log.info("Processing sentences...");
-
-
-        final AtomicLong numWordsSoFar = new AtomicLong(0);
-
-
-        final AtomicLong nextRandom = new AtomicLong(5);
-        final AtomicInteger doc = new AtomicInteger(0);
-        ExecutorService exec = new ThreadPoolExecutor(Runtime.getRuntime().availableProcessors(),
-                Runtime.getRuntime().availableProcessors(),
-                0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<Runnable>(), new RejectedExecutionHandler() {
-            @Override
-            public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-                executor.submit(r);
-            }
-        });
-
-
-        final Queue<Pair<List<VocabWord>,Collection<VocabWord>>> batch2 = new ConcurrentLinkedDeque<>();
-        int[] docs = vectorizer.index().allDocs();
-        if(docs.length < 1)
-            throw new IllegalStateException("No documents found");
-
-        vectorizer.index().eachDocWithLabels(new Function<Pair<List<VocabWord>, Collection<String>>, Void>() {
-            @Override
-            public Void apply(@Nullable Pair<List<VocabWord>, Collection<String>> input) {
-                List<VocabWord> batch = new ArrayList<>();
-                addWords(input.getFirst(), nextRandom, batch);
-
-                if (batch.isEmpty())
-                    return null;
-
-                Collection<VocabWord> docLabels = new ArrayList<>();
-                for(String s : input.getSecond())
-                    docLabels.add(vocab().wordFor(s));
-                batch2.add(new Pair<>(batch, docLabels));
-
-                doc.incrementAndGet();
-                if (doc.get() > 0 && doc.get() % 10000 == 0)
-                    log.info("Doc " + doc.get() + " done so far");
-
-                return null;
-            }
-
-
-
-        }, exec);
-
-
-
-        if(!batch2.isEmpty()) {
-            jobQueue.add(new LinkedList<>(batch2));
-
-        }
-
-
-        exec.shutdown();
-        try {
-            exec.awaitTermination(1,TimeUnit.DAYS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-
-        for(int i = 0; i < numIterations; i++)
-            doIteration(batch2,numWordsSoFar,nextRandom);
-
-    }
+    @Getter protected LabelsSource labelsSource;
+    @Getter @Setter protected transient LabelAwareIterator labelAwareIterator;
 
 
     /**
-     * Builds the vocabulary for training
+     * This method takes raw text, applies tokenizer, and returns most probable label
+     *
+     * @param rawText
+     * @return
      */
-    @Override
-    public boolean buildVocab() {
-        readStopWords();
+    @Deprecated
+    public String predict(String rawText) {
+        if (tokenizerFactory == null) throw new IllegalStateException("TokenizerFactory should be defined, prior to predict() call");
 
-        if(vocab().vocabExists()) {
-            log.info("Loading vocab...");
-            vocab().loadVocab();
-            lookupTable.resetWeights();
-            return true;
+        List<String> tokens = tokenizerFactory.create(rawText).getTokens();
+        List<VocabWord> document = new ArrayList<>();
+        for (String token: tokens) {
+            if (vocab.containsWord(token)) {
+                document.add(vocab.wordFor(token));
+            }
         }
 
-
-        if(invertedIndex == null)
-            invertedIndex = new LuceneInvertedIndex.Builder()
-                    .cache(vocab()).stopWords(stopWords)
-                    .build();
-        //vectorizer will handle setting up vocab meta data
-        if(vectorizer == null) {
-            vectorizer = new TfidfVectorizer.Builder().index(invertedIndex)
-                    .cache(vocab()).iterate(docIter).iterate(sentenceIter).batchSize(batchSize)
-                    .minWords(minWordFrequency).stopWords(stopWords)
-                    .tokenize(tokenizerFactory).build();
-
-            vectorizer.fit();
-
-        }
-
-        //includes unk
-        else if(vocab().numWords() < 2)
-            vectorizer.fit();
-
-        for(String label : labels) {
-            VocabWord word = new VocabWord(vocab.numWords(),label);
-            word.setIndex(vocab.numWords());
-            vocab().addToken(word);
-            vocab().putVocabWord(label);
-        }
-
-
-        setup();
-
-        return false;
+        return predict(document);
     }
 
     /**
-     * Predict several based on the document.
+     * This method predicts label of the document.
      * Computes a similarity wrt the mean of the
      * representation of words in the document
      * @param document the document
      * @return the word distances for each label
      */
+    @Deprecated
+    public String predict(LabelledDocument document) {
+        if (document.getReferencedContent() != null)
+            return predict(document.getReferencedContent());
+        else return predict(document.getContent());
+    }
+
+
+    /**
+     * This method calculates inferred vector for given text
+     *
+     * @param text
+     * @return
+     */
+    public INDArray inferVector(String text, double learningRate, double minLearningRate, int iterations) {
+        if (tokenizerFactory == null) throw new IllegalStateException("TokenizerFactory should be defined, prior to predict() call");
+
+        List<String> tokens = tokenizerFactory.create(text).getTokens();
+        List<VocabWord> document = new ArrayList<>();
+        for (String token: tokens) {
+            if (vocab.containsWord(token)) {
+                document.add(vocab.wordFor(token));
+            }
+        }
+
+        return inferVector(document, learningRate, minLearningRate, iterations);
+    }
+
+    /**
+     * This method calculates inferred vector for given document
+     *
+     * @param document
+     * @return
+     */
+    public INDArray inferVector(LabelledDocument document, double learningRate, double minLearningRate, int iterations) {
+        if (document.getReferencedContent() != null) {
+            return inferVector(document.getReferencedContent(), this.learningRate.get(), this.minLearningRate, this.numEpochs);
+        } else return inferVector(document.getContent(), this.learningRate.get(), this.minLearningRate, this.numEpochs);
+    }
+
+    /**
+     * This method calculates inferred vector for given document
+     *
+     * @param document
+     * @return
+     */
+    public INDArray inferVector(List<VocabWord> document, double learningRate, double minLearningRate, int iterations) {
+        if (sequenceLearningAlgorithm == null) {
+            sequenceLearningAlgorithm = new DBOW<>();
+            sequenceLearningAlgorithm.configure(vocab, lookupTable, configuration);
+        }
+        Sequence<VocabWord> sequence = new Sequence<>();
+        sequence.addElements(document);
+        sequence.setSequenceLabel(new VocabWord(1.0, String.valueOf(new Random().nextInt())));
+
+        for (int i = 0; i < iterations; i++) {
+            sequenceLearningAlgorithm.learnSequence(sequence, new AtomicLong(0), learningRate);
+        }
+        return null;
+    }
+
+    /**
+     * This method calculates inferred vector for given text, with default parameters for learning rate and iterations
+     *
+     * @param text
+     * @return
+     */
+    public INDArray inferVector(String text) {
+        return inferVector(text, this.learningRate.get(), this.minLearningRate, this.numEpochs);
+    }
+
+    /**
+     * This method calculates inferred vector for given document, with default parameters for learning rate and iterations
+     *
+     * @param document
+     * @return
+     */
+    public INDArray inferVector(LabelledDocument document) {
+        return inferVector(document, this.learningRate.get(), this.minLearningRate, this.numEpochs);
+    }
+
+    /**
+     * This method calculates inferred vector for given list of words, with default parameters for learning rate and iterations
+     *
+     * @param document
+     * @return
+     */
+    public INDArray inferVector(List<VocabWord> document) {
+        return inferVector(document, this.learningRate.get(), this.minLearningRate, this.numEpochs);
+    }
+
+    /**
+     * This method predicts label of the document.
+     * Computes a similarity wrt the mean of the
+     * representation of words in the document
+     * @param document the document
+     * @return the word distances for each label
+     */
+    @Deprecated
     public String predict(List<VocabWord> document) {
+        /*
+            This code was transferred from original ParagraphVectors DL4j implementation, and yet to be tested
+         */
+        if (document.isEmpty()) throw new IllegalStateException("Document has no words inside");
+
         INDArray arr = Nd4j.create(document.size(),this.layerSize);
         for(int i = 0; i < document.size(); i++) {
             arr.putRow(i,getWordVectorMatrix(document.get(i).getWord()));
@@ -229,25 +187,65 @@ public class ParagraphVectors extends Word2Vec {
         INDArray docMean = arr.mean(0);
         Counter<String> distances = new Counter<>();
 
-        for(String s : labels) {
+        for(String s : labelsSource.getLabels()) {
             INDArray otherVec = getWordVectorMatrix(s);
             double sim = Transforms.cosineSim(docMean, otherVec);
             distances.incrementCount(s, sim);
         }
 
         return distances.argMax();
-
     }
 
+    /**
+     * Predict several labels based on the document.
+     * Computes a similarity wrt the mean of the
+     * representation of words in the document
+     * @param document raw text of the document
+     * @return possible labels in descending order
+     */
+    @Deprecated
+    public Collection<String> predictSeveral(@NonNull LabelledDocument document, int limit) {
+        if (document.getReferencedContent() != null) {
+            return predictSeveral(document.getReferencedContent(), limit);
+        } else return predictSeveral(document.getContent(), limit);
+    }
 
     /**
-     * Predict several based on the document.
+     * Predict several labels based on the document.
+     * Computes a similarity wrt the mean of the
+     * representation of words in the document
+     * @param rawText raw text of the document
+     * @return possible labels in descending order
+     */
+    @Deprecated
+    public Collection<String> predictSeveral(String rawText, int limit) {
+        if (tokenizerFactory == null) throw new IllegalStateException("TokenizerFactory should be defined, prior to predict() call");
+
+        List<String> tokens = tokenizerFactory.create(rawText).getTokens();
+        List<VocabWord> document = new ArrayList<>();
+        for (String token: tokens) {
+            if (vocab.containsWord(token)) {
+                document.add(vocab.wordFor(token));
+            }
+        }
+
+        return predictSeveral(document, limit);
+    }
+
+    /**
+     * Predict several labels based on the document.
      * Computes a similarity wrt the mean of the
      * representation of words in the document
      * @param document the document
-     * @return the word distances for each label
+     * @return possible labels in descending order
      */
-    public Counter<String> predictSeveral(List<VocabWord> document) {
+    @Deprecated
+    public Collection<String> predictSeveral(List<VocabWord> document, int limit) {
+        /*
+            This code was transferred from original ParagraphVectors DL4j implementation, and yet to be tested
+         */
+        if (document.isEmpty()) throw new IllegalStateException("Document has no words inside");
+
         INDArray arr = Nd4j.create(document.size(),this.layerSize);
         for(int i = 0; i < document.size(); i++) {
             arr.putRow(i,getWordVectorMatrix(document.get(i).getWord()));
@@ -256,362 +254,707 @@ public class ParagraphVectors extends Word2Vec {
         INDArray docMean = arr.mean(0);
         Counter<String> distances = new Counter<>();
 
-        for(String s : labels) {
+        for(String s : labelsSource.getLabels()) {
             INDArray otherVec = getWordVectorMatrix(s);
             double sim = Transforms.cosineSim(docMean, otherVec);
+            log.debug("Similarity inside: ["+s+"] -> " + sim);
             distances.incrementCount(s, sim);
         }
 
-        return distances;
-
-    }
-
-
-
-
-    /**
-     * Train on a list of vocab words
-     * @param sentenceWithLabel the list of vocab words to train on
-     */
-    public void trainSentence(final Pair<List<VocabWord>, Collection<VocabWord>> sentenceWithLabel,AtomicLong nextRandom,double alpha) {
-        if(sentenceWithLabel == null || sentenceWithLabel.getFirst().isEmpty())
-            return;
-        for(int i = 0; i < sentenceWithLabel.getFirst().size(); i++) {
-            nextRandom.set(nextRandom.get() * 25214903917L + 11);
-            dbow(i, sentenceWithLabel, (int) nextRandom.get() % window, nextRandom, alpha);
-        }
-
+        return distances.getSortedKeys().subList(0, limit);
     }
 
     /**
-     * Train the distributed bag of words
-     * model
-     * @param i the word to train
-     * @param sentenceWithLabel the sentence with labels to train
-     * @param b
-     * @param nextRandom
-     * @param alpha
+     * This method returns top N labels nearest to specified document
+     *
+     * @param document
+     * @param topN
+     * @return
      */
-    public void dbow(int i, Pair<List<VocabWord>, Collection<VocabWord>> sentenceWithLabel, int b, AtomicLong nextRandom, double alpha) {
+    public Collection<String> nearestLabels(LabelledDocument document, int topN) {
+        if (document.getReferencedContent() != null) {
+            return nearestLabels(document.getReferencedContent(), topN);
+        } else return nearestLabels(document.getContent(), topN);
+    }
 
-        final VocabWord word = sentenceWithLabel.getFirst().get(i);
-        List<VocabWord> sentence = sentenceWithLabel.getFirst();
-        List<VocabWord> labels = (List<VocabWord>) sentenceWithLabel.getSecond();
-
-        if(word == null || sentence.isEmpty())
-            return;
-
-
-        int end =  window * 2 + 1 - b;
-        for(int a = b; a < end; a++) {
-            if(a != window) {
-                int c = i - window + a;
-                if(c >= 0 && c < labels.size()) {
-                    VocabWord lastWord = labels.get(c);
-                    iterate(word,lastWord,nextRandom,alpha);
-                }
+    /**
+     * This method returns top N labels nearest to specified text
+     *
+     * @param rawText
+     * @param topN
+     * @return
+     */
+    public Collection<String> nearestLabels(String rawText, int topN) {
+        List<String> tokens = tokenizerFactory.create(rawText).getTokens();
+        List<VocabWord> document = new ArrayList<>();
+        for (String token: tokens) {
+            if (vocab.containsWord(token)) {
+                document.add(vocab.wordFor(token));
             }
         }
+        return  nearestLabels(document, topN);
     }
 
-    public List<String> getLabels() {
-        return labels;
+    /**
+     * This method returns top N labels nearest to specified set of vocab words
+     *
+     * @param document
+     * @param topN
+     * @return
+     */
+    public Collection<String> nearestLabels(Collection<VocabWord> document, int topN) {
+        // TODO: to be implemented
+        throw new UnsupportedOperationException("Not implemented yet");
     }
 
-    public void setLabels(List<String> labels) {
-        this.labels = labels;
+    /**
+     * This method returns top N labels nearest to specified features vector
+     *
+     * @param labelVector
+     * @param topN
+     * @return
+     */
+    public Collection<String> nearestLabels(INDArray labelVector, int topN) {
+        // TODO: to be implemented
+        throw new UnsupportedOperationException("Not implemented yet");
     }
 
-    protected void addWords(List<VocabWord> sentence,AtomicLong nextRandom,List<VocabWord> currMiniBatch) {
-        for (VocabWord word : sentence) {
-            if(word == null)
-                continue;
-            // The subsampling randomly discards frequent words while keeping the ranking same
-            if (sample > 0) {
-                double numDocs =  vectorizer.index().numDocuments();
-                double ran = (Math.sqrt(word.getWordFrequency() / (sample * numDocs)) + 1)
-                        * (sample * numDocs) / word.getWordFrequency();
+    /**
+     * This method returns similarity of the document to specific label, based on mean value
+     *
+     * @param rawText
+     * @param label
+     * @return
+     */
+    public double similarityToLabel(String rawText, String label) {
+        if (tokenizerFactory == null) throw new IllegalStateException("TokenizerFactory should be defined, prior to predict() call");
 
-                if (ran < (nextRandom.get() & 0xFFFF) / (double) 65536) {
-                    continue;
-                }
-
-                currMiniBatch.add(word);
+        List<String> tokens = tokenizerFactory.create(rawText).getTokens();
+        List<VocabWord> document = new ArrayList<>();
+        for (String token: tokens) {
+            if (vocab.containsWord(token)) {
+                document.add(vocab.wordFor(token));
             }
-            else
-                currMiniBatch.add(word);
-
-
-
         }
+        return similarityToLabel(document, label);
     }
 
-
-    private void doIteration(Queue<Pair<List<VocabWord>,Collection<VocabWord>>> batch2,final AtomicLong numWordsSoFar,final AtomicLong nextRandom) {
-        ActorSystem actorSystem = ActorSystem.create();
-        final AtomicLong lastReport = new AtomicLong(System.currentTimeMillis());
-        Parallelization.iterateInParallel(batch2, new Parallelization.RunnableWithParams<Pair<List<VocabWord>, Collection<VocabWord>>>() {
-            @Override
-            public void run(Pair<List<VocabWord>, Collection<VocabWord>> sentenceWithLabel, Object[] args) {
-                double alpha = Math.max(minLearningRate, ParagraphVectors.this.alpha.get() * (1 - (1.0 * (double) numWordsSoFar.get() / (double) totalWords)));
-                long diff = Math.abs(lastReport.get() - numWordsSoFar.get());
-                if(numWordsSoFar.get() > 0 && diff >=  10000) {
-                    log.info("Words so far " + numWordsSoFar.get() + " with alpha at " + alpha);
-                    lastReport.set(numWordsSoFar.get());
-                }
-                long increment = 0;
-                double diff2 = 0.0;
-                trainSentence(sentenceWithLabel, nextRandom, alpha);
-                increment += sentenceWithLabel.getFirst().size();
-
-
-                log.info("Train sentence avg took " + diff2 / (double) sentenceWithLabel.getFirst().size());
-                numWordsSoFar.set(numWordsSoFar.get() + increment);
-            }
-        },actorSystem);
+    /**
+     * This method returns similarity of the document to specific label, based on mean value
+     *
+     * @param document
+     * @param label
+     * @return
+     */
+    public double similarityToLabel(LabelledDocument document, String label) {
+        if (document.getReferencedContent() != null) {
+            return similarityToLabel(document.getReferencedContent(), label);
+        } else return similarityToLabel(document.getContent(), label);
     }
+
+    /**
+     * This method returns similarity of the document to specific label, based on mean value
+     *
+     * @param document
+     * @param label
+     * @return
+     */
+    public double similarityToLabel(List<VocabWord> document, String label) {
+        if (document.isEmpty()) throw new IllegalStateException("Document has no words inside");
+
+        INDArray arr = Nd4j.create(document.size(),this.layerSize);
+        for(int i = 0; i < document.size(); i++) {
+            arr.putRow(i,getWordVectorMatrix(document.get(i).getWord()));
+        }
+
+        INDArray docMean = arr.mean(0);
+
+        INDArray otherVec = getWordVectorMatrix(label);
+        double sim = Transforms.cosineSim(docMean, otherVec);
+        return sim;
+    }
+
 
 
     public static class Builder extends Word2Vec.Builder {
-        private List<String> labels;
+        protected LabelAwareIterator labelAwareIterator;
+        protected LabelsSource labelsSource;
+        protected DocumentIterator docIter;
+
+
+
+
+        /**
+         * This method allows you to use pre-built WordVectors model (Word2Vec or GloVe) for ParagraphVectors.
+         * Existing model will be transferred into new model before training starts.
+         *
+         * PLEASE NOTE: Non-normalized model is recommended to use here.
+         *
+         * @param vec existing WordVectors model
+         * @return
+         */
         @Override
-        public Builder index(InvertedIndex index) {
+        protected Builder useExistingWordVectors(@NonNull WordVectors vec) {
+            this.existingVectors = vec;
+            return this;
+        }
+
+        /**
+         * This method defines, if words representations should be build together with documents representations.
+         *
+         * @param trainElements
+         * @return
+         */
+        public Builder trainWordVectors(boolean trainElements) {
+            this.trainElementsRepresentation(trainElements);
+            return this;
+        }
+
+        /**
+         * This method attaches pre-defined labels source to ParagraphVectors
+         *
+         * @param source
+         * @return
+         */
+        public Builder labelsSource(@NonNull LabelsSource source) {
+            this.labelsSource = source;
+            return this;
+        }
+
+        /**
+         * This method builds new LabelSource instance from labels.
+         *
+         * PLEASE NOTE: Order synchro between labels and input documents delegated to end-user.
+         * PLEASE NOTE: Due to order issues it's recommended to use label aware iterators instead.
+         *
+         * @param labels
+         * @return
+         */
+        @Deprecated
+        public Builder labels(@NonNull List<String> labels) {
+            this.labelsSource = new LabelsSource(labels);
+            return this;
+        }
+
+        /**
+         * This method used to feed LabelAwareDocumentIterator, that contains training corpus, into ParagraphVectors
+         *
+         * @param iterator
+         * @return
+         */
+        public Builder iterate(@NonNull LabelAwareDocumentIterator iterator) {
+            this.docIter = iterator;
+            return this;
+        }
+
+        /**
+         * This method used to feed LabelAwareSentenceIterator, that contains training corpus, into ParagraphVectors
+         *
+         * @param iterator
+         * @return
+         */
+        public Builder iterate(@NonNull LabelAwareSentenceIterator iterator) {
+            this.sentenceIterator = iterator;
+            return this;
+        }
+
+        /**
+         * This method used to feed LabelAwareIterator, that contains training corpus, into ParagraphVectors
+         *
+         * @param iterator
+         * @return
+         */
+        public Builder iterate(@NonNull LabelAwareIterator iterator) {
+            this.labelAwareIterator = iterator;
+            return this;
+        }
+
+        /**
+         * This method used to feed DocumentIterator, that contains training corpus, into ParagraphVectors
+         *
+         * @param iterator
+         * @return
+         */
+        @Override
+        public Builder iterate(@NonNull DocumentIterator iterator) {
+            this.docIter = iterator;
+            return this;
+        }
+
+        /**
+         * This method used to feed SentenceIterator, that contains training corpus, into ParagraphVectors
+         *
+         * @param iterator
+         * @return
+         */
+        @Override
+        public Builder iterate(@NonNull SentenceIterator iterator) {
+            this.sentenceIterator = iterator;
+            return this;
+        }
+
+        /**
+         * Sets ModelUtils that gonna be used as provider for utility methods: similarity(), wordsNearest(), accuracy(), etc
+         *
+         * @param modelUtils model utils to be used
+         * @return
+         */
+        @Override
+        public Builder modelUtils(@NonNull ModelUtils<VocabWord> modelUtils) {
+            super.modelUtils(modelUtils);
+            return this;
+        }
+
+        /**
+         * This method allows you to specify SequenceElement that will be used as UNK element, if UNK is used
+         *
+         * @param element
+         * @return
+         */
+        @Override
+        public Builder unknownElement(VocabWord element) {
+            super.unknownElement(element);
+            return this;
+        }
+
+        /**
+         * This method allows you to specify, if UNK word should be used internally
+         *
+         * @param reallyUse
+         * @return
+         */
+        @Override
+        public Builder useUnknown(boolean reallyUse) {
+            super.useUnknown(reallyUse);
+            if (this.unknownElement == null) {
+                this.unknownElement(new VocabWord(1.0, ParagraphVectors.DEFAULT_UNK));
+            }
+            return this;
+        }
+
+        @Override
+        public ParagraphVectors build() {
+            presetTables();
+
+            ParagraphVectors ret = new ParagraphVectors();
+
+            if (this.existingVectors != null) {
+                this.trainElementsVectors = false;
+                this.elementsLearningAlgorithm = null;
+            }
+
+            if (this.labelsSource == null) this.labelsSource = new LabelsSource();
+            if (docIter != null) {
+                /*
+                        we're going to work with DocumentIterator.
+                        First, we have to assume that user can provide LabelAwareIterator. In this case we'll use them, as provided source, and collec labels provided there
+                        Otherwise we'll go for own labels via LabelsSource
+                */
+
+                if (docIter instanceof LabelAwareDocumentIterator) this.labelAwareIterator = new DocumentIteratorConverter((LabelAwareDocumentIterator) docIter, labelsSource);
+                    else this.labelAwareIterator = new DocumentIteratorConverter(docIter, labelsSource);
+            } else if (sentenceIterator != null) {
+                    // we have SentenceIterator. Mechanics will be the same, as above
+                 if (sentenceIterator instanceof LabelAwareSentenceIterator) this.labelAwareIterator = new SentenceIteratorConverter((LabelAwareSentenceIterator) sentenceIterator, labelsSource);
+                      else this.labelAwareIterator = new SentenceIteratorConverter(sentenceIterator, labelsSource);
+            } else if (labelAwareIterator != null) {
+                 // if we have LabelAwareIterator defined, we have to be sure that LabelsSource is propagated properly
+                 this.labelsSource = labelAwareIterator.getLabelsSource();
+            } else  {
+                // we have nothing, probably that's restored model building. ignore iterator for now.
+                // probably there's few reasons to move iterator initialization code into ParagraphVectors methos. Like protected setLabelAwareIterator method.
+            }
+
+            if (labelAwareIterator != null) {
+                SentenceTransformer transformer = new SentenceTransformer.Builder()
+                        .iterator(labelAwareIterator)
+                        .tokenizerFactory(tokenizerFactory)
+                        .build();
+                this.iterator = new AbstractSequenceIterator.Builder<>(transformer).build();
+            }
+
+            ret.numEpochs = this.numEpochs;
+            ret.numIterations = this.iterations;
+            ret.vocab = this.vocabCache;
+            ret.minWordFrequency = this.minWordFrequency;
+            ret.learningRate.set(this.learningRate);
+            ret.minLearningRate = this.minLearningRate;
+            ret.sampling = this.sampling;
+            ret.negative = this.negative;
+            ret.layerSize = this.layerSize;
+            ret.batchSize = this.batchSize;
+            ret.learningRateDecayWords = this.learningRateDecayWords;
+            ret.window = this.window;
+            ret.resetModel = this.resetModel;
+            ret.useAdeGrad = this.useAdaGrad;
+            ret.stopWords = this.stopWords;
+            ret.workers = this.workers;
+            ret.useUnknown = this.useUnknown;
+            ret.unknownElement = this.unknownElement;
+
+            ret.trainElementsVectors = this.trainElementsVectors;
+            ret.trainSequenceVectors = this.trainSequenceVectors;
+
+            ret.elementsLearningAlgorithm = this.elementsLearningAlgorithm;
+            ret.sequenceLearningAlgorithm = this.sequenceLearningAlgorithm;
+
+            ret.tokenizerFactory = this.tokenizerFactory;
+
+            ret.existingModel = this.existingVectors;
+
+            ret.lookupTable = this.lookupTable;
+            ret.modelUtils = this.modelUtils;
+            ret.eventListeners = this.vectorsListeners;
+
+            this.configuration.setLearningRate(this.learningRate);
+            this.configuration.setLayersSize(layerSize);
+            this.configuration.setHugeModelExpected(hugeModelExpected);
+            this.configuration.setWindow(window);
+            this.configuration.setMinWordFrequency(minWordFrequency);
+            this.configuration.setIterations(iterations);
+            this.configuration.setSeed(seed);
+            this.configuration.setBatchSize(batchSize);
+            this.configuration.setLearningRateDecayWords(learningRateDecayWords);
+            this.configuration.setMinLearningRate(minLearningRate);
+            this.configuration.setSampling(this.sampling);
+            this.configuration.setUseAdaGrad(useAdaGrad);
+            this.configuration.setNegative(negative);
+            this.configuration.setEpochs(this.numEpochs);
+            this.configuration.setStopList(this.stopWords);
+
+            ret.configuration = this.configuration;
+
+
+            // hardcoded to TRUE, since it's ParagraphVectors wrapper
+            ret.trainElementsVectors = this.trainElementsVectors;
+            ret.trainSequenceVectors = true;
+            ret.labelsSource = this.labelsSource;
+            ret.labelAwareIterator = this.labelAwareIterator;
+            ret.iterator = this.iterator;
+
+            return ret;
+        }
+
+        public Builder() {
+            super();
+        }
+
+        public Builder(@NonNull VectorsConfiguration configuration) {
+            super(configuration);
+        }
+
+
+        /**
+         * This method defines TokenizerFactory to be used for strings tokenization during training
+         * PLEASE NOTE: If external VocabCache is used, the same TokenizerFactory should be used to keep derived tokens equal.
+         *
+         * @param tokenizerFactory
+         * @return
+         */
+        @Override
+        public Builder tokenizerFactory(@NonNull TokenizerFactory tokenizerFactory) {
+            super.tokenizerFactory(tokenizerFactory);
+            return this;
+        }
+
+        @Override
+        public Builder index(@NonNull InvertedIndex<VocabWord> index) {
             super.index(index);
             return this;
         }
 
+        /**
+         * This method used to feed SequenceIterator, that contains training corpus, into ParagraphVectors
+         *
+         * @param iterator
+         * @return
+         */
         @Override
-        public Builder workers(int workers) {
-            super.workers(workers);
+        public Builder iterate(@NonNull SequenceIterator<VocabWord> iterator) {
+            super.iterate(iterator);
             return this;
         }
 
-        @Override
-        public Builder sampling(double sample) {
-            super.sampling(sample);
-            return this;
-        }
-
-        @Override
-        public Builder negativeSample(double negative) {
-            super.negativeSample(negative);
-            return this;
-        }
-
-        @Override
-        public Builder minLearningRate(double minLearningRate) {
-            super.minLearningRate(minLearningRate);
-            return this;
-        }
-
-        @Override
-        public Builder useAdaGrad(boolean useAdaGrad) {
-            super.useAdaGrad(useAdaGrad);
-            return this;
-        }
-
-        @Override
-        public Builder vectorizer(TextVectorizer textVectorizer) {
-            super.vectorizer(textVectorizer);
-            return this;
-        }
-
-        @Override
-        public Builder learningRateDecayWords(int learningRateDecayWords) {
-            super.learningRateDecayWords(learningRateDecayWords);
-            return this;
-        }
-
+        /**
+         * This method defines mini-batch size
+         * @param batchSize
+         * @return
+         */
         @Override
         public Builder batchSize(int batchSize) {
             super.batchSize(batchSize);
             return this;
         }
 
-        @Override
-        public Builder saveVocab(boolean saveVocab) {
-            super.saveVocab(saveVocab);
-            return this;
-        }
-
-        @Override
-        public Builder seed(long seed) {
-            super.seed(seed);
-            return this;
-        }
-
+        /**
+         * This method defines number of iterations done for each mini-batch during training
+         * @param iterations
+         * @return
+         */
         @Override
         public Builder iterations(int iterations) {
             super.iterations(iterations);
             return this;
         }
 
+        /**
+         * This method defines number of epochs (iterations over whole training corpus) for training
+         * @param numEpochs
+         * @return
+         */
         @Override
-        public Builder learningRate(double lr) {
-            super.learningRate(lr);
+        public Builder epochs(int numEpochs) {
+            super.epochs(numEpochs);
             return this;
         }
 
-        @Override
-        public Builder iterate(DocumentIterator iter) {
-            super.iterate(iter);
-            return this;
-        }
-
-        @Override
-        public  Builder vocabCache(VocabCache cache) {
-            super.vocabCache(cache);
-            return this;
-        }
-
-        @Override
-        public Builder minWordFrequency(int minWordFrequency) {
-            super.minWordFrequency(minWordFrequency);
-            return this;
-        }
-
-        @Override
-        public Builder tokenizerFactory(TokenizerFactory tokenizerFactory) {
-            super.tokenizerFactory(tokenizerFactory);
-            return this;
-        }
-
+        /**
+         * This method defines number of dimensions for output vectors
+         * @param layerSize
+         * @return
+         */
         @Override
         public Builder layerSize(int layerSize) {
             super.layerSize(layerSize);
             return this;
         }
 
+        /**
+         * This method sets VectorsListeners for this SequenceVectors model
+         *
+         * @param vectorsListeners
+         * @return
+         */
         @Override
-        public Builder stopWords(List<String> stopWords) {
-            super.stopWords(stopWords);
+        public Builder setVectorsListeners(@NonNull Collection<VectorsListener<VocabWord>> vectorsListeners) {
+            super.setVectorsListeners(vectorsListeners);
             return this;
         }
 
+        /**
+         * This method defines initial learning rate for model training
+         *
+         * @param learningRate
+         * @return
+         */
         @Override
-        public Builder windowSize(int window) {
-            super.windowSize(window);
+        public Builder learningRate(double learningRate) {
+            super.learningRate(learningRate);
             return this;
         }
 
+        /**
+         * This method defines minimal word frequency in training corpus. All words below this threshold will be removed prior model training
+         *
+         * @param minWordFrequency
+         * @return
+         */
         @Override
-        public Builder iterate(SentenceIterator iter) {
-            super.iterate(iter);
+        public Builder minWordFrequency(int minWordFrequency) {
+            super.minWordFrequency(minWordFrequency);
             return this;
         }
 
+        /**
+         * This method defines minimal learning rate value for training
+         *
+         * @param minLearningRate
+         * @return
+         */
         @Override
-        public Builder lookupTable(WeightLookupTable lookupTable) {
+        public Builder minLearningRate(double minLearningRate) {
+            super.minLearningRate(minLearningRate);
+            return this;
+        }
+
+        /**
+         * This method defines whether model should be totally wiped out prior building, or not
+         *
+         * @param reallyReset
+         * @return
+         */
+        @Override
+        public Builder resetModel(boolean reallyReset) {
+            super.resetModel(reallyReset);
+            return this;
+        }
+
+        /**
+         * This method allows to define external VocabCache to be used
+         *
+         * @param vocabCache
+         * @return
+         */
+        @Override
+        public Builder vocabCache(@NonNull VocabCache<VocabWord> vocabCache) {
+            super.vocabCache(vocabCache);
+            return this;
+        }
+
+        /**
+         * This method allows to define external WeightLookupTable to be used
+         *
+         * @param lookupTable
+         * @return
+         */
+        @Override
+        public Builder lookupTable(@NonNull WeightLookupTable<VocabWord> lookupTable) {
             super.lookupTable(lookupTable);
             return this;
         }
 
         /**
-         * Specify labels
-         * @param labels the labels to specify
-         * @return builder pattern
+         * This method defines whether subsampling should be used or not
+         *
+         * @param sampling set > 0 to subsampling argument, or 0 to disable
+         * @return
          */
-        public Builder labels(List<String> labels) {
-            this.labels = labels;
+        @Override
+        public Builder sampling(double sampling) {
+            super.sampling(sampling);
+            return this;
+        }
+
+        /**
+         * This method defines whether adaptive gradients should be used or not
+         *
+         * @param reallyUse
+         * @return
+         */
+        @Override
+        public Builder useAdaGrad(boolean reallyUse) {
+            super.useAdaGrad(reallyUse);
+            return this;
+        }
+
+        /**
+         * This method defines whether negative sampling should be used or not
+         *
+         * @param negative set > 0 as negative sampling argument, or 0 to disable
+         * @return
+         */
+        @Override
+        public Builder negativeSample(double negative) {
+            super.negativeSample(negative);
+            return this;
+        }
+
+        /**
+         * This method defines stop words that should be ignored during training
+         * @param stopList
+         * @return
+         */
+        @Override
+        public Builder stopWords(@NonNull List<String> stopList) {
+            super.stopWords(stopList);
+            return this;
+        }
+
+        /**
+         * This method defines, if words representation should be build together with documents representations.
+         *
+         * @param trainElements
+         * @return
+         */
+        @Override
+        public Builder trainElementsRepresentation(boolean trainElements) {
+            this.trainElementsVectors = trainElements;
+            return this;
+        }
+
+        /**
+         * This method is hardcoded to TRUE, since that's whole point of ParagraphVectors
+         *
+         * @param trainSequences
+         * @return
+         */
+        @Override
+        public Builder trainSequencesRepresentation(boolean trainSequences) {
+            this.trainSequenceVectors = trainSequences;
+            return this;
+        }
+
+        /**
+         * This method defines stop words that should be ignored during training
+         *
+         * @param stopList
+         * @return
+         */
+        @Override
+        public Builder stopWords(@NonNull Collection<VocabWord> stopList) {
+            super.stopWords(stopList);
+            return this;
+        }
+
+        /**
+         * This method defines context window size
+         *
+         * @param windowSize
+         * @return
+         */
+        @Override
+        public Builder windowSize(int windowSize) {
+            super.windowSize(windowSize);
+            return this;
+        }
+
+        /**
+         * This method defines maximum number of concurrent threads available for training
+         *
+         * @param numWorkers
+         * @return
+         */
+        @Override
+        public Builder workers(int numWorkers) {
+            super.workers(numWorkers);
             return this;
         }
 
         @Override
-        public ParagraphVectors build() {
+        public Builder sequenceLearningAlgorithm(SequenceLearningAlgorithm<VocabWord> algorithm) {
+            super.sequenceLearningAlgorithm(algorithm);
+            return this;
+        }
 
-            if(iter == null) {
-                ParagraphVectors ret = new ParagraphVectors();
-                ret.window = window;
-                ret.alpha.set(lr);
-                ret.vectorizer = textVectorizer;
-                ret.stopWords = stopWords;
-                ret.setVocab(vocabCache);
-                ret.numIterations = iterations;
-                ret.minWordFrequency = minWordFrequency;
-                ret.seed = seed;
-                ret.saveVocab = saveVocab;
-                ret.batchSize = batchSize;
-                ret.useAdaGrad = useAdaGrad;
-                ret.minLearningRate = minLearningRate;
-                ret.sample = sampling;
-                ret.workers = workers;
-                ret.invertedIndex = index;
-                ret.lookupTable = lookupTable;
-                try {
-                    if (tokenizerFactory == null)
-                        tokenizerFactory = new UimaTokenizerFactory();
-                }catch(Exception e) {
-                    throw new RuntimeException(e);
-                }
+        @Override
+        public Builder sequenceLearningAlgorithm(String algorithm) {
+            super.sequenceLearningAlgorithm(algorithm);
+            return this;
+        }
 
-                if(vocabCache == null) {
-                    vocabCache = new InMemoryLookupCache();
+        /**
+         * This method has no effect for ParagraphVectors
+         *
+         * @param windows
+         * @return
+         */
+        @Override
+        public Builder useVariableWindow(int... windows) {
+            // no-op
+            return this;
+        }
 
-                    ret.setVocab(vocabCache);
-                }
+        @Override
+        public Builder elementsLearningAlgorithm(ElementsLearningAlgorithm<VocabWord> algorithm) {
+            super.elementsLearningAlgorithm(algorithm);
+            return this;
+        }
 
-                if(lookupTable == null) {
-                    lookupTable = new InMemoryLookupTable.Builder().negative(negative)
-                            .useAdaGrad(useAdaGrad).lr(lr).cache(vocabCache)
-                            .vectorLength(layerSize).build();
-                }
+        @Override
+        public Builder elementsLearningAlgorithm(String algorithm) {
+            super.elementsLearningAlgorithm(algorithm);
+            return this;
+        }
 
-
-                ret.docIter = docIter;
-                ret.lookupTable = lookupTable;
-                ret.tokenizerFactory = tokenizerFactory;
-                ret.labels = labels;
-                return ret;
-            }
-
-            else {
-                ParagraphVectors ret = new ParagraphVectors();
-                ret.alpha.set(lr);
-                ret.sentenceIter = iter;
-                ret.window = window;
-                ret.useAdaGrad = useAdaGrad;
-                ret.minLearningRate = minLearningRate;
-                ret.vectorizer = textVectorizer;
-                ret.stopWords = stopWords;
-                ret.minWordFrequency = minWordFrequency;
-                ret.setVocab(vocabCache);
-                ret.docIter = docIter;
-                ret.minWordFrequency = minWordFrequency;
-                ret.numIterations = iterations;
-                ret.seed = seed;
-                ret.numIterations = iterations;
-                ret.saveVocab = saveVocab;
-                ret.batchSize = batchSize;
-                ret.sample = sampling;
-                ret.workers = workers;
-                ret.invertedIndex = index;
-                ret.lookupTable = lookupTable;
-
-                try {
-                    if (tokenizerFactory == null)
-                        tokenizerFactory = new UimaTokenizerFactory();
-                }catch(Exception e) {
-                    throw new RuntimeException(e);
-                }
-
-                if(vocabCache == null) {
-                    vocabCache = new InMemoryLookupCache();
-
-                    ret.setVocab(vocabCache);
-                }
-
-                if(lookupTable == null) {
-                    lookupTable = new InMemoryLookupTable.Builder().negative(negative)
-                            .useAdaGrad(useAdaGrad).lr(lr).cache(vocabCache)
-                            .vectorLength(layerSize).build();
-                }
-                ret.lookupTable = lookupTable;
-                ret.tokenizerFactory = tokenizerFactory;
-                ret.labels = labels;
-                return ret;
-            }
+        /**
+         * This method defines random seed for random numbers generator
+         * @param randomSeed
+         * @return
+         */
+        @Override
+        public Builder seed(long randomSeed) {
+            super.seed(randomSeed);
+            return this;
         }
     }
-
-
 }

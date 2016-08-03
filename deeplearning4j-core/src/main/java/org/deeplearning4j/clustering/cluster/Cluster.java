@@ -18,19 +18,21 @@
 
 package org.deeplearning4j.clustering.cluster;
 
+import org.nd4j.linalg.factory.Nd4j;
+
+import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
-import org.nd4j.linalg.factory.Nd4j;
-
-public class Cluster {
+public class Cluster implements Serializable {
 
 	private String id = UUID.randomUUID().toString();
 	private String label;
 
 	private Point center;
-	private List<Point>	points	= new ArrayList<>();
+	private List<Point>	points	= Collections.synchronizedList(new ArrayList<Point>());
 
 	private String distanceFunction;
 
@@ -67,7 +69,7 @@ public class Cluster {
 	}
 
 	public boolean isEmpty() {
-		return points == null || points.size() == 0;
+		return points == null || points.isEmpty();
 	}
 
 	public Point getPoint(String id) {

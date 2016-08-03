@@ -1,14 +1,15 @@
 package org.deeplearning4j.models.word2vec;
 
-import static org.junit.Assert.assertEquals;
-
-import java.util.Collection;
-
+import org.datavec.api.util.ClassPathResource;
 import org.deeplearning4j.models.embeddings.loader.WordVectorSerializer;
 import org.deeplearning4j.models.embeddings.wordvectors.WordVectors;
 import org.junit.Before;
 import org.junit.Test;
-import org.springframework.core.io.ClassPathResource;
+
+import java.util.Collection;
+
+import static org.junit.Assert.assertEquals;
+
 
 public class Word2VecTestsSmall
 {
@@ -31,7 +32,7 @@ public class Word2VecTestsSmall
 
         Collection<String> nearestWords = word2vec.wordsNearest(word, neighbours);
         System.out.println(nearestWords);
-        assertEquals(nearestWords.iterator().next(), expectedNeighbour);
+        assertEquals(expectedNeighbour, nearestWords.iterator().next());
     }
 
     @Test
@@ -42,13 +43,13 @@ public class Word2VecTestsSmall
 
         Collection<String> nearestWords = word2vec.wordsNearest(word, neighbours);
         System.out.println(nearestWords);
-        assertEquals(nearestWords.size(), neighbours);
+        assertEquals(neighbours, nearestWords.size());
 
     }
 
     @Test
     public void testPlot()
     {
-        word2vec.lookupTable().plotVocab();
+        //word2vec.lookupTable().plotVocab();
     }
 }

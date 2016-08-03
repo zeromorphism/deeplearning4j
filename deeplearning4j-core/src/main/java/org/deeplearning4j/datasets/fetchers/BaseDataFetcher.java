@@ -18,16 +18,15 @@
 
 package org.deeplearning4j.datasets.fetchers;
 
-import java.util.List;
-
 import org.deeplearning4j.datasets.iterator.DataSetFetcher;
-
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.dataset.DataSet;
 import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.util.FeatureUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.List;
 
 /**
  * A base class for assisting with creation of matrices
@@ -92,7 +91,17 @@ public abstract class BaseDataFetcher implements DataSetFetcher {
         examples.clear();
 
 	}
-	
+
+	/**
+	 * Sets a list of label names to the curr dataset
+	 */
+	public void setLabelNames(List<String > names) {
+		curr.setLabelNames(names);
+	}
+
+	public String getLabelName(int i) {
+		return curr.getLabelNames().get(i);
+	}
 	@Override
 	public boolean hasMore() {
 		return cursor < totalExamples;

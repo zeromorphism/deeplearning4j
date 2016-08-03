@@ -20,12 +20,10 @@ package org.deeplearning4j.nn.conf.preprocessor;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-
 import lombok.Data;
-import lombok.NoArgsConstructor;
-
-import org.deeplearning4j.nn.api.Layer;
+import lombok.EqualsAndHashCode;
 import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.util.ArrayUtil;
 
 /**Reshape post processor.<br>
  * Used to reshape activations on forward pass.<br>
@@ -34,25 +32,25 @@ import org.nd4j.linalg.api.ndarray.INDArray;
  *
  * @author Adam Gibson
  */
-@Data
+@Data @EqualsAndHashCode(callSuper=false)
 public class ReshapePreProcessor extends BaseInputPreProcessor {
     private int[] fromShape;	//Epsilons: To this shape in backward pass
     private int[] toShape;		//Activations: To this shape in forward pass
     private boolean dynamic=true;
 
-	/**
-	 * @param fromShape May be null. If null: no change/op during backward pass.
-	 * @param toShape The shape that activations are reshaped to
+    /**
+     * @param fromShape May be null. If null: no change/op during backward pass.
+     * @param toShape The shape that activations are reshaped to
      * @param dynamic Infer the number of examples or not
      * Otherwise fromShape is the shape that epsilons (weights*deltas or equiv.)
-	 *  are reshaped to by backprop(...)
-	 */
+     *  are reshaped to by backprop(...)
+     */
     @JsonCreator
     public ReshapePreProcessor(@JsonProperty("fromShape") int[] fromShape,
                                @JsonProperty("toShape") int[] toShape,
                                @JsonProperty("dynamic") boolean dynamic){
         this.fromShape = fromShape;
-	    this.toShape = toShape;
+        this.toShape = toShape;
         this.dynamic = dynamic;
     }
 
@@ -64,16 +62,19 @@ public class ReshapePreProcessor extends BaseInputPreProcessor {
     }
 
     @Override
-    public INDArray preProcess(INDArray input, Layer layer) {
+    public INDArray preProcess(INDArray input, int miniBatchSize) {
         if (dynamic) fromShape[0] = input.shape()[0];
         if (input.shape().length == toShape.length) return input;
         return input.reshape(toShape);
     }
 
     @Override
-    public INDArray backprop(INDArray output, Layer layer){
-	if( fromShape == null || output.shape().length == fromShape.length) return output;	//no-op
-	return output.reshape(fromShape);
+    public INDArray backprop(INDArray output, int miniBatchSize) {
+        if( fromShape == null || output.shape().length == fromShape.length)
+            return output;	//no-op
+        if(output.length() != ArrayUtil.prod(fromShape))
+            throw new IllegalStateException("Illegal shape");
+        return output.reshape(fromShape);
     }
 
     @Override

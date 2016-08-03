@@ -18,19 +18,13 @@
 
 package org.deeplearning4j.clustering.cluster;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
 import org.deeplearning4j.berkeley.Pair;
-import org.nd4j.linalg.api.ndarray.INDArray;
-import org.nd4j.linalg.api.ops.Accumulation;
 import org.nd4j.linalg.factory.Nd4j;
 
-public class ClusterSet {
+import java.io.Serializable;
+import java.util.*;
+
+public class ClusterSet implements Serializable {
 
 	private String	distanceFunction;
 	private List<Cluster> clusters;
@@ -104,7 +98,7 @@ public class ClusterSet {
 			}
 		}
 
-		return new Pair<Cluster, Double>(nearestCluster, minDistance);
+		return new Pair<>(nearestCluster, minDistance);
 
 	}
 
@@ -143,7 +137,7 @@ public class ClusterSet {
 	}
 
 	public List<Cluster> getMostPopulatedClusters(int count) {
-		List<Cluster> mostPopulated = new ArrayList<Cluster>(clusters);
+		List<Cluster> mostPopulated = new ArrayList<>(clusters);
 		Collections.sort(mostPopulated, new Comparator<Cluster>() {
 			public int compare(Cluster o1, Cluster o2) {
 				return new Integer(o1.getPoints().size()).compareTo(new Integer(o2.getPoints().size()));
@@ -153,7 +147,7 @@ public class ClusterSet {
 	}
 
 	public List<Cluster> removeEmptyClusters() {
-		List<Cluster> emptyClusters = new ArrayList<Cluster>();
+		List<Cluster> emptyClusters = new ArrayList<>();
 		for (Cluster cluster : clusters)
 			if (cluster.isEmpty())
 				emptyClusters.add(cluster);

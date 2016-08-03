@@ -18,29 +18,19 @@
 
 package org.deeplearning4j.util;
 
-import static org.deeplearning4j.berkeley.StringUtils.splitOnCharWithQuoting;
-
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.StringTokenizer;
-
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.deeplearning4j.berkeley.Counter;
 import org.deeplearning4j.berkeley.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.*;
+
+import static org.deeplearning4j.berkeley.StringUtils.splitOnCharWithQuoting;
 
 
 
@@ -116,7 +106,7 @@ public class StringGrid extends ArrayList<List<String>> {
         for(int i = 0;i< list.size(); i++) {
             String line = list.get(i).trim();
             //text delimiter
-            if(line.indexOf("\"") > 0) {
+            if(line.indexOf('\"') > 0) {
                 Counter<Character> counter = new Counter<>();
                 for(int j = 0; j <  line.length(); j++) {
                     counter.incrementCount(line.charAt(j),1.0);
@@ -218,7 +208,7 @@ public class StringGrid extends ArrayList<List<String>> {
     }
 
     public void sortColumnsByWordLikelihoodIncluded(final int column) {
-        final Counter<String> counter = new Counter<String>();
+        final Counter<String> counter = new Counter<>();
         List<String> col = getColumn(column);
 
 
@@ -237,7 +227,7 @@ public class StringGrid extends ArrayList<List<String>> {
 
         //laplace smoothing
         counter.incrementAll(counter.keySet(), 1.0);
-        Set<String> remove = new HashSet<String>();
+        Set<String> remove = new HashSet<>();
         for(String key : counter.keySet())
             if(key.length() < 2 || key.matches("[a-z]+"))
                 remove.add(key);
@@ -299,7 +289,7 @@ public class StringGrid extends ArrayList<List<String>> {
             }
         }
         FingerPrintKeyer keyer = new FingerPrintKeyer();
-        Set<Integer> alreadyDeDupped = new HashSet<Integer>();
+        Set<Integer> alreadyDeDupped = new HashSet<>();
         for(int i = 0; i< size(); i++) {
             String key = keyer.key(get(i).get(column));
             Map<String,Integer> map = cluster.get(key);
@@ -324,10 +314,11 @@ public class StringGrid extends ArrayList<List<String>> {
     private void modifyRows(Set<Integer> alreadyDeDupped,Integer column,List<Integer> rows,Map<String,Integer> cluster) {
         String chosenKey = null;
         Integer max = null;
-
-        for(String key : cluster.keySet()) {
+        for (Map.Entry<String, Integer> entry : cluster.entrySet()) {
+            String key = entry.getKey();
+            int value = entry.getValue();
             StringTokenizer val = new StringTokenizer(key);
-            List<String> list = new ArrayList<String>();
+            List<String> list = new ArrayList<>();
             boolean allLower = true;
 
             outer: while(val.hasMoreTokens()) {
@@ -351,14 +342,9 @@ public class StringGrid extends ArrayList<List<String>> {
             if(list.get(list.size() -1).toLowerCase().equals("the")) {
                 continue;
             }
-            //first selection that's valid
-            if(max == null) {
-                max = cluster.get(key);
-                chosenKey = key;
-            }
-            //count is higher
-            else if(!allLower && cluster.get(key) > max) {
-                max = cluster.get(key);
+            //first selection that's valid or count is higher
+            if(max == null || (!allLower && value > max)) {
+                max = value;
                 chosenKey = key;
             }
         }
@@ -368,7 +354,7 @@ public class StringGrid extends ArrayList<List<String>> {
             //getFromOrigin the max value of the cluster
             String max2 = maximalValue(cluster);
             StringTokenizer val = new StringTokenizer(max2);
-            List<String> list = new ArrayList<String>();
+            List<String> list = new ArrayList<>();
             while(val.hasMoreTokens()) {
                 String token = val.nextToken();
                 //weird capitalization
@@ -406,9 +392,9 @@ public class StringGrid extends ArrayList<List<String>> {
     }
 
     private String maximalValue(Map<String,Integer> map) {
-        Counter<String> counter = new Counter<String>();
-        for(String s : map.keySet()) {
-            counter.incrementCount(s,map.get(s));
+        Counter<String> counter = new Counter<>();
+        for (Map.Entry<String, Integer> entry : map.entrySet()) {
+            counter.incrementCount(entry.getKey(), entry.getValue());
         }
         return counter.argMax();
     }
@@ -421,7 +407,7 @@ public class StringGrid extends ArrayList<List<String>> {
 
 
     public List<Integer> filterRowsByColumn(int column,Collection<String> values) {
-        List<Integer> list = new ArrayList<Integer>();
+        List<Integer> list = new ArrayList<>();
         for(int i = 0; i< size(); i++) {
             if(values.contains(get(i).get(column)))
                 list.add(i);
@@ -443,9 +429,9 @@ public class StringGrid extends ArrayList<List<String>> {
     }
 
     public List<String> toLines() {
-        List<String> lines = new ArrayList<String>();
+        List<String> lines = new ArrayList<>();
         for(List<String> list : this) {
-            StringBuffer sb = new StringBuffer();
+            StringBuilder sb = new StringBuilder();
             for(String s : list) {
                 sb.append(s.replaceAll(sep," "));
                 sb.append(sep);
@@ -472,7 +458,7 @@ public class StringGrid extends ArrayList<List<String>> {
 
         if(column1 != column2)
             for(List<String> list : this) {
-                StringBuffer sb = new StringBuffer();
+                StringBuilder sb = new StringBuilder();
                 sb.append(list.get(column1));
                 sb.append(list.get(column2));
                 list.set(Math.min(column1,column2),sb.toString().replaceAll("\"","").replace(sep," "));
@@ -522,7 +508,7 @@ public class StringGrid extends ArrayList<List<String>> {
     public void split(int column,String sepBy) {
         List<String> col = getColumn(column);
         int validate = -1;
-        Set<String> remove = new HashSet<String>();
+        Set<String> remove = new HashSet<>();
         for(int i = 0; i< col.size(); i++) {
             String s = col.get(i);
             String[] split2 = StringUtils.splitOnCharWithQuoting(s, sepBy.charAt(0), '"', '\\');
@@ -559,8 +545,9 @@ public class StringGrid extends ArrayList<List<String>> {
         }
 
         //prevent concurrent modification
-        for(Integer i : replace.keySet())
-            set(i,replace.get(i));
+        for (Map.Entry<Integer, List<String>> entry : replace.entrySet()) {
+            set(entry.getKey(), entry.getValue());
+        }
     }
 
     public void filterBySimilarity(double threshold,int firstColumn,int secondColumn) {
@@ -605,7 +592,7 @@ public class StringGrid extends ArrayList<List<String>> {
      */
     public void combineColumns(int templateColumn,Integer[] paramColumns) {
         for(List<String> list : this) {
-            List<String> format = new ArrayList<String>();
+            List<String> format = new ArrayList<>();
             for(int j : paramColumns)
                 format.add(list.get(j));
 
@@ -690,7 +677,7 @@ public class StringGrid extends ArrayList<List<String>> {
         checkInvalidColumn(column);
         StringGrid grid = new StringGrid(sep,numColumns);
         List<String> columns = getColumn(column);
-        Counter<String> counter = new Counter<String>();
+        Counter<String> counter = new Counter<>();
         for(String val : columns)
             counter.incrementCount(val,1.0);
         counter.pruneKeysBelowThreshold(2.0);
@@ -708,11 +695,11 @@ public class StringGrid extends ArrayList<List<String>> {
         checkInvalidColumn(column);
         StringGrid grid = new StringGrid(sep,numColumns);
         List<String> columns = getColumn(column);
-        Counter<String> counter = new Counter<String>();
+        Counter<String> counter = new Counter<>();
         for(String val : columns)
             counter.incrementCount(val,1.0);
 
-        Set<String> keys = new HashSet<String>(counter.keySet());
+        Set<String> keys = new HashSet<>(counter.keySet());
         for(String key : keys) {
             if(counter.getCount(key) > 1) {
                 counter.removeKey(key);

@@ -19,13 +19,11 @@
 package org.deeplearning4j.clustering.quadtree;
 
 import com.google.common.util.concurrent.AtomicDouble;
-import java.io.Serializable;
-import java.util.Set;
-import java.util.TreeSet;
-
 import org.apache.commons.math3.util.FastMath;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.factory.Nd4j;
+
+import java.io.Serializable;
 
 import static java.lang.Math.max;
 
@@ -181,8 +179,7 @@ public class QuadTree implements Serializable {
 
     private boolean insertIntoOneOf(int index) {
         boolean success = false;
-        if(!success)
-            success = northWest.insert(index);
+        success = northWest.insert(index);
         if(!success)
             success = northEast.insert(index);
         if(!success)

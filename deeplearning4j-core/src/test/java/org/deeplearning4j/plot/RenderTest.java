@@ -6,12 +6,10 @@ import org.deeplearning4j.nn.api.OptimizationAlgorithm;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.conf.distribution.NormalDistribution;
 import org.deeplearning4j.nn.layers.factory.LayerFactories;
-import org.deeplearning4j.nn.layers.feedforward.autoencoder.AutoEncoder;
 import org.deeplearning4j.nn.params.DefaultParamInitializer;
 import org.deeplearning4j.nn.weights.WeightInit;
 import org.deeplearning4j.optimize.api.IterationListener;
 import org.deeplearning4j.optimize.listeners.ScoreIterationListener;
-import org.deeplearning4j.plot.iterationlistener.NeuralNetPlotterIterationListener;
 import org.deeplearning4j.plot.iterationlistener.PlotFiltersIterationListener;
 import org.junit.Test;
 import org.nd4j.linalg.api.ndarray.INDArray;
@@ -22,10 +20,6 @@ import org.nd4j.linalg.lossfunctions.LossFunctions;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.List;
-
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
 
 /**
  * @author Adam Gibson
@@ -53,7 +47,7 @@ public class RenderTest {
         Nd4j.MAX_SLICES_TO_PRINT = Integer.MAX_VALUE;
         NeuralNetConfiguration conf = new NeuralNetConfiguration.Builder()
                 .optimizationAlgo(OptimizationAlgorithm.LINE_GRADIENT_DESCENT)
-                .iterations(10).constrainGradientToUnitNorm(true)
+                .iterations(10)
                 .learningRate(1e-1f)
                 .layer(new org.deeplearning4j.nn.conf.layers.RBM.Builder()
                         .nIn(784).nOut(600)
@@ -68,7 +62,9 @@ public class RenderTest {
 
         INDArray input = d2.getFeatureMatrix();
         Collection<IterationListener> listeners = Arrays.asList(new ScoreIterationListener(1),listener);
-        Layer da = LayerFactories.getFactory(conf.getLayer()).create(conf, listeners,0);
+        int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+        INDArray params = Nd4j.create(1, numParams);
+        Layer da = LayerFactories.getFactory(conf.getLayer()).create(conf, listeners,0, params, true);
         da.fit(input);
 
 

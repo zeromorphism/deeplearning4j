@@ -20,13 +20,13 @@ package org.deeplearning4j.plot.dropwizard;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.dropwizard.Configuration;
-import org.hibernate.validator.constraints.NotEmpty;
 
 /**
  * Api Configuration
  *
  * @author Adam Gibson
  */
+@Deprecated
 public class ApiConfiguration extends Configuration {
 
 

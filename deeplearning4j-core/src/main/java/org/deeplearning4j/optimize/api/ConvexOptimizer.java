@@ -23,12 +23,11 @@ import org.deeplearning4j.nn.api.Model;
 import org.deeplearning4j.nn.api.Updater;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.gradient.Gradient;
+import org.deeplearning4j.nn.updater.graph.ComputationGraphUpdater;
 import org.nd4j.linalg.api.ndarray.INDArray;
-import org.nd4j.linalg.learning.AdaGrad;
-import org.nd4j.linalg.learning.GradientUpdater;
 
 import java.io.Serializable;
-import java.util.Map;
+import java.util.Collection;
 
 /**
  * Convex optimizer.
@@ -42,6 +41,14 @@ public interface ConvexOptimizer extends Serializable {
     double score();
 
     Updater getUpdater();
+
+    ComputationGraphUpdater getComputationGraphUpdater();
+
+    void setUpdater(Updater updater);
+
+    void setUpdaterComputationGraph(ComputationGraphUpdater updater);
+
+    void setListeners(Collection<IterationListener> listeners);
 
     NeuralNetConfiguration getConf();
 

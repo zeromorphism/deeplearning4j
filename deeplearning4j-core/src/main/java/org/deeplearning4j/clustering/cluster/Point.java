@@ -18,14 +18,15 @@
 
 package org.deeplearning4j.clustering.cluster;
 
+import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.factory.Nd4j;
+
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-import org.nd4j.linalg.api.ndarray.INDArray;
-import org.nd4j.linalg.factory.Nd4j;
-
-public class Point  {
+public class Point  implements Serializable {
 
 	private static final long	serialVersionUID = -6658028541426027226L;
 

@@ -18,9 +18,6 @@
 
 package org.deeplearning4j.aws.s3;
 
-import java.io.File;
-import java.io.InputStream;
-
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.auth.PropertiesCredentials;
@@ -28,6 +25,9 @@ import com.amazonaws.services.ec2.AmazonEC2;
 import com.amazonaws.services.ec2.AmazonEC2Client;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
+
+import java.io.File;
+import java.io.InputStream;
 
 
 /**
@@ -56,8 +56,8 @@ public abstract class BaseS3 {
 	protected AWSCredentials creds;
 	public final static String ACCESS_KEY = "org.deeplearning4j.aws.accessKey";
 	public final static String  ACCESS_SECRET = "org.deeplearning4j.aws.accessSecret";
-	public final static String AWS_ACCESS_KEY = "AWS_ACCESS_KEY_ID";
-	public final static String AWS_SECRET_KEY = "AWS_SECRET_ACCESS_KEY";
+	public final static String AWS_ACCESS_KEY = "AWS_ACCESS_KEY"; //"AWS_ACCESS_KEY_ID";
+	public final static String AWS_SECRET_KEY = "AWS_SECRET_KEY"; //"AWS_SECRET_ACCESS_KEY";
 	
 	
 	protected void findCreds() {

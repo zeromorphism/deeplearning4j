@@ -19,6 +19,7 @@
 package org.deeplearning4j.models.embeddings.wordvectors;
 
 import org.deeplearning4j.models.embeddings.WeightLookupTable;
+import org.deeplearning4j.models.embeddings.reader.ModelUtils;
 import org.deeplearning4j.models.word2vec.wordstore.VocabCache;
 import org.nd4j.linalg.api.ndarray.INDArray;
 
@@ -35,6 +36,9 @@ import java.util.Map;
  */
 public interface WordVectors extends Serializable {
 
+    String getUNK();
+
+    void setUNK(String newUNK);
 
     /**
      * Returns true if the model has this word in the vocab
@@ -105,6 +109,24 @@ public interface WordVectors extends Serializable {
      * @return the ndarray for this word
      */
     INDArray getWordVectorMatrix(String word);
+
+
+    /**
+     * This method returns 2D array, where each row represents corresponding word/label
+     *
+     * @param labels
+     * @return
+     */
+    INDArray getWordVectors(Collection<String> labels);
+
+    /**
+     * This method returns mean vector, built from words/labels passed in
+     *
+     * @param labels
+     * @return
+     */
+    INDArray getWordVectorsMean(Collection<String> labels);
+
     /**
      * Words nearest based on positive and negative words
      * @param positive the positive words
@@ -144,5 +166,11 @@ public interface WordVectors extends Serializable {
      * @return
      */
     WeightLookupTable lookupTable();
+
+    /**
+     * Specifies ModelUtils to be used to access model
+     * @param utils
+     */
+    void setModelUtils(ModelUtils utils);
 
 }

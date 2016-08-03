@@ -1,32 +1,37 @@
 package org.deeplearning4j.nn.layers.convolution;
 
-import static org.junit.Assert.*;
-
 import org.deeplearning4j.berkeley.Pair;
 import org.deeplearning4j.datasets.iterator.impl.MnistDataSetIterator;
 import org.deeplearning4j.nn.api.Layer;
+import org.deeplearning4j.nn.conf.GradientNormalization;
+import org.deeplearning4j.nn.conf.MultiLayerConfiguration;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
+import org.deeplearning4j.nn.conf.inputs.InvalidInputTypeException;
+import org.deeplearning4j.nn.conf.layers.OutputLayer;
 import org.deeplearning4j.nn.conf.layers.SubsamplingLayer;
+import org.deeplearning4j.nn.conf.layers.setup.ConvolutionLayerSetup;
 import org.deeplearning4j.nn.gradient.DefaultGradient;
 import org.deeplearning4j.nn.gradient.Gradient;
 import org.deeplearning4j.nn.layers.factory.LayerFactories;
+import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
 import org.deeplearning4j.nn.params.DefaultParamInitializer;
+import org.deeplearning4j.nn.weights.WeightInit;
 import org.junit.Test;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.dataset.DataSet;
 import org.nd4j.linalg.dataset.api.iterator.DataSetIterator;
 import org.nd4j.linalg.factory.Nd4j;
 
-import static org.junit.Assert.*;
-
 import java.util.Arrays;
+
+import static org.junit.Assert.*;
 
 /**
  * @author Adam Gibson
  */
 public class SubsamplingLayerTest {
 
-    private int nExamples;
+    private int nExamples=1;
     private int depth = 20; //depth & nOut
     private int nChannelsIn = 1;
     private int inputWidth = 28;
@@ -129,6 +134,9 @@ public class SubsamplingLayerTest {
 
         INDArray input2 = getData();
         layer.activate(input2);
+        int depth = input2.size(1);
+
+        epsilon = Nd4j.ones(5, depth, featureMapHeight, featureMapWidth);
 
         Pair<Gradient, INDArray> out = layer.backpropGradient(epsilon);
         assertEquals(input.shape().length, out.getSecond().shape().length);
@@ -198,14 +206,14 @@ public class SubsamplingLayerTest {
 
     private Layer getSubsamplingLayer(SubsamplingLayer.PoolingType pooling){
         NeuralNetConfiguration conf = new NeuralNetConfiguration.Builder()
-                .constrainGradientToUnitNorm(true)
+                .gradientNormalization(GradientNormalization.RenormalizeL2PerLayer)
                 .seed(123)
                 .layer(new SubsamplingLayer.Builder(pooling, new int[] {2, 2})
                         .activation("relu")
                         .build())
                 .build();
 
-        return LayerFactories.getFactory(new SubsamplingLayer()).create(conf);
+        return LayerFactories.getFactory(conf).create(conf, null, 0, null, true);
     }
 
     public INDArray getData() throws Exception {
@@ -232,6 +240,56 @@ public class SubsamplingLayerTest {
         gradient.gradientForVariable().put(DefaultParamInitializer.WEIGHT_KEY, pseudoGradients);
         return gradient;
     }
+
+    //////////////////////////////////////////////////////////////////////////////////
+
+    @Test(expected = InvalidInputTypeException.class)
+    public void testSubTooLargeKernel(){
+        int imageHeight= 20;
+        int imageWidth= 23;
+        int nChannels = 1;
+        int classes = 2;
+        int numSamples = 200;
+
+        int kernelHeight = 3;
+        int kernelWidth = 3;
+
+        DataSet trainInput;
+        MultiLayerConfiguration.Builder builder = new NeuralNetConfiguration.Builder()
+                .seed(123)
+                .iterations(1)
+                .list()
+                .layer(0, new org.deeplearning4j.nn.conf.layers.ConvolutionLayer.Builder(kernelHeight, kernelWidth)
+                        .stride(1,1)
+                        .nOut(2)
+                        .activation("relu")
+                        .weightInit(WeightInit.XAVIER)
+                        .build())
+                .layer(1, new SubsamplingLayer.Builder()
+                        .poolingType(SubsamplingLayer.PoolingType.MAX)
+                        .kernelSize(imageHeight-kernelHeight+2,1)   //imageHeight-kernelHeight+1 is ok: full height
+                        .stride(1,1)
+                        .build())
+                .layer(2, new OutputLayer.Builder()
+                        .nOut(classes)
+                        .weightInit(WeightInit.XAVIER)
+                        .activation("softmax")
+                        .build())
+                .backprop(true).pretrain(false);
+        new ConvolutionLayerSetup(builder,imageHeight,imageWidth,nChannels);
+
+        MultiLayerConfiguration conf = builder.build();
+        MultiLayerNetwork model = new MultiLayerNetwork(conf);
+        model.init();
+
+        INDArray emptyFeatures = Nd4j.zeros(numSamples,imageWidth*imageHeight*nChannels);
+        INDArray emptyLables = Nd4j.zeros(numSamples,classes);
+
+        trainInput = new DataSet(emptyFeatures,emptyLables);
+        model.fit(trainInput);
+    }
+
+
 
 
 }

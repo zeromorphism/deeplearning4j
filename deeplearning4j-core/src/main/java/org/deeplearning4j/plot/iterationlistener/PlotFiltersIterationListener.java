@@ -1,9 +1,9 @@
 package org.deeplearning4j.plot.iterationlistener;
 
+import org.datavec.image.loader.ImageLoader;
 import org.deeplearning4j.nn.api.Model;
 import org.deeplearning4j.optimize.api.IterationListener;
 import org.deeplearning4j.plot.PlotFilters;
-import org.deeplearning4j.util.ImageLoader;
 import org.nd4j.linalg.api.ndarray.INDArray;
 
 import javax.imageio.ImageIO;
@@ -72,7 +72,7 @@ public class PlotFiltersIterationListener implements IterationListener {
 
     @Override
     public void iterationDone(Model model, int iteration) {
-        if(iteration % this.iteration == 0) {
+        if(this.iteration > 0 && iteration % this.iteration == 0) {
             INDArray weights = model.getParam(variables.get(0));
             filters.setInput(weights.transpose());
             filters.plot();

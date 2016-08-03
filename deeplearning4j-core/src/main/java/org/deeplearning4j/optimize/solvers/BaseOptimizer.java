@@ -18,28 +18,26 @@
 
 package org.deeplearning4j.optimize.solvers;
 
-import com.google.common.annotations.VisibleForTesting;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import org.deeplearning4j.berkeley.Pair;
 import org.deeplearning4j.exception.InvalidStepException;
 import org.deeplearning4j.nn.api.Layer;
 import org.deeplearning4j.nn.api.Model;
 import org.deeplearning4j.nn.api.Updater;
+import org.deeplearning4j.nn.conf.LearningRatePolicy;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.gradient.Gradient;
+import org.deeplearning4j.nn.graph.ComputationGraph;
 import org.deeplearning4j.nn.updater.UpdaterCreator;
+import org.deeplearning4j.nn.updater.graph.ComputationGraphUpdater;
 import org.deeplearning4j.optimize.api.ConvexOptimizer;
 import org.deeplearning4j.optimize.api.IterationListener;
 import org.deeplearning4j.optimize.api.StepFunction;
 import org.deeplearning4j.optimize.api.TerminationCondition;
-import org.deeplearning4j.optimize.stepfunctions.DefaultStepFunction;
 import org.deeplearning4j.optimize.stepfunctions.NegativeDefaultStepFunction;
 import org.deeplearning4j.optimize.stepfunctions.NegativeGradientStepFunction;
 import org.deeplearning4j.optimize.terminations.EpsTermination;
 import org.deeplearning4j.optimize.terminations.ZeroDirection;
 import org.nd4j.linalg.api.ndarray.INDArray;
-import org.nd4j.linalg.factory.Nd4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,6 +59,7 @@ public abstract class BaseOptimizer implements ConvexOptimizer {
     protected Model model;
     protected BackTrackLineSearch lineMaximizer;
     protected Updater updater;
+    protected ComputationGraphUpdater computationGraphUpdater;
     protected double step;
     private int batchSize;
     protected double score,oldScore;
@@ -112,7 +111,36 @@ public abstract class BaseOptimizer implements ConvexOptimizer {
 
     @Override
     public Updater getUpdater() {
+        if(updater == null) {
+            updater = UpdaterCreator.getUpdater(model);
+        }
         return updater;
+    }
+
+    @Override
+    public void setUpdater(Updater updater){
+        this.updater = updater;
+    }
+
+
+
+    @Override
+    public ComputationGraphUpdater getComputationGraphUpdater() {
+        if(computationGraphUpdater == null && model instanceof ComputationGraph){
+            computationGraphUpdater = new ComputationGraphUpdater((ComputationGraph)model);
+        }
+        return computationGraphUpdater;
+    }
+
+    @Override
+    public void setUpdaterComputationGraph(ComputationGraphUpdater updater) {
+        this.computationGraphUpdater = updater;
+    }
+
+    @Override
+    public void setListeners(Collection<IterationListener> listeners){
+        if(listeners == null) this.iterationListeners = Collections.emptyList();
+        else this.iterationListeners = listeners;
     }
 
     @Override
@@ -120,8 +148,10 @@ public abstract class BaseOptimizer implements ConvexOptimizer {
 
     @Override
     public Pair<Gradient,Double> gradientAndScore() {
+        oldScore = score;
         model.computeGradientAndScore();
         Pair<Gradient,Double> pair = model.gradientAndScore();
+        score = pair.getSecond();
         updateGradientAccordingToParams(pair.getFirst(), model, model.batchSize());
         return pair;
     }
@@ -139,24 +169,23 @@ public abstract class BaseOptimizer implements ConvexOptimizer {
         INDArray parameters = null;
         model.validateInput();
         Pair<Gradient,Double> pair = gradientAndScore();
-        score = pair.getSecond();
         if(searchState.isEmpty()){
-        	searchState.put(GRADIENT_KEY, pair.getFirst().gradient());
-        	setupSearchState(pair);		//Only do this once
+            searchState.put(GRADIENT_KEY, pair.getFirst().gradient());
+            setupSearchState(pair);		//Only do this once
         } else {
-        	searchState.put(GRADIENT_KEY, pair.getFirst().gradient());
+            searchState.put(GRADIENT_KEY, pair.getFirst().gradient());
         }
 
         //pre existing termination conditions
         /*
          * Commented out for now; this has been problematic for testing/debugging
-         * Revisit & re-enable later.
+         * Revisit & re-enable later. */
         for(TerminationCondition condition : terminationConditions){
-            if(condition.terminate(0.0,0.0,new Object[]{gradient})) {
+            if(condition.terminate(0.0,0.0,new Object[]{pair.getFirst().gradient()})) {
                 log.info("Hit termination condition " + condition.getClass().getName());
                 return true;
             }
-        }*/
+        }
 
         //calculate initial search direction
         preProcessLine();
@@ -182,13 +211,10 @@ public abstract class BaseOptimizer implements ConvexOptimizer {
                 log.debug("Step size returned by line search is 0.0.");
             }
 
-            //record old score for deltas and other termination conditions
-            oldScore = score;
             pair = gradientAndScore();
 
             //updates searchDirection
             postStep(pair.getFirst().gradient());
-            score = pair.getSecond();
 
             //invoke listeners for debugging
             for(IterationListener listener : iterationListeners)
@@ -210,8 +236,8 @@ public abstract class BaseOptimizer implements ConvexOptimizer {
         for(TerminationCondition condition : terminationConditions){
             if(condition.terminate(score,oldScore,new Object[]{gradient})){
                 log.debug("Hit termination condition on iteration {}: score={}, oldScore={}, condition={}", i, score, oldScore, condition);
-                if(condition instanceof EpsTermination && !Double.isNaN(conf.getLayer().getLrScoreBasedDecay())) {
-                    conf.getLayer().setLearningRate(conf.getLayer().getLearningRate() / (conf.getLayer().getLrScoreBasedDecay() + Nd4j.EPS_THRESHOLD));
+                if(condition instanceof EpsTermination && conf.getLayer() != null && conf.getLearningRatePolicy() == LearningRatePolicy.Score) {
+                    model.applyLearningRateScoreDecay();
                 }
                 return true;
             }
@@ -248,10 +274,19 @@ public abstract class BaseOptimizer implements ConvexOptimizer {
 
     @Override
     public void updateGradientAccordingToParams(Gradient gradient, Model model, int batchSize) {
-        if(updater == null)
-            updater = UpdaterCreator.getUpdater(model);
-        Layer layer = (Layer) model;
-        updater.update(layer, gradient, iteration);
+        if(model instanceof ComputationGraph){
+            ComputationGraph graph = (ComputationGraph)model;
+            if(computationGraphUpdater == null){
+                computationGraphUpdater = new ComputationGraphUpdater(graph);
+            }
+            computationGraphUpdater.update(graph, gradient, iteration, batchSize);
+        } else {
+
+            if (updater == null)
+                updater = UpdaterCreator.getUpdater(model);
+            Layer layer = (Layer) model;
+            updater.update(layer, gradient, iteration, batchSize);
+        }
     }
 
     /**
@@ -261,7 +296,7 @@ public abstract class BaseOptimizer implements ConvexOptimizer {
     @Override
     public  void setupSearchState(Pair<Gradient, Double> pair) {
         INDArray gradient = pair.getFirst().gradient(conf.variables());
-        INDArray params = model.params();
+        INDArray params = model.params().dup(); //Need dup here: params returns an array that isn't a copy (hence changes to this are problematic for line search methods)
         searchState.put(GRADIENT_KEY,gradient);
         searchState.put(SCORE_KEY,pair.getSecond());
         searchState.put(PARAMS_KEY,params);
@@ -269,12 +304,11 @@ public abstract class BaseOptimizer implements ConvexOptimizer {
 
 
     public static StepFunction getDefaultStepFunctionForOptimizer( Class<? extends ConvexOptimizer> optimizerClass ){
-        log.warn("Objective function automatically set to minimize. Set stepFunction in neural net configuration to change default settings.");
-    	if( optimizerClass == StochasticGradientDescent.class ){
-    		return new NegativeGradientStepFunction();
-    	} else {
-    		return new NegativeDefaultStepFunction();
-    	}
+        if( optimizerClass == StochasticGradientDescent.class ){
+            return new NegativeGradientStepFunction();
+        } else {
+            return new NegativeDefaultStepFunction();
+        }
     }
 
 }

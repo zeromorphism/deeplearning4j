@@ -28,7 +28,6 @@ import org.deeplearning4j.util.Dropout;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.indexing.NDArrayIndex;
-import org.nd4j.linalg.ops.transforms.Transforms;
 
 import static org.nd4j.linalg.indexing.NDArrayIndex.interval;
 
@@ -208,7 +207,7 @@ public class GRU extends BaseRecurrentLayer<org.deeplearning4j.nn.conf.layers.GR
 
 	@Override
 	public INDArray activate(INDArray input, boolean training){
-		setInput(input, training);
+		setInput(input);
 		return activateHelper(training,null)[0];
 	}
 
@@ -256,10 +255,8 @@ public class GRU extends BaseRecurrentLayer<org.deeplearning4j.nn.conf.layers.GR
 //		INDArray wC = recurrentWeights.get(NDArrayIndex.all(),NDArrayIndex.interval(2*hiddenLayerSize,3*hiddenLayerSize));
 		
 		//Apply dropconnect to input (not recurrent) weights only:
-		if(conf.isUseDropConnect() && training) {
-			if (conf.getLayer().getDropOut() > 0) {
-				inputWeights = Dropout.applyDropConnect(this,GRUParamInitializer.INPUT_WEIGHT_KEY);
-			}
+		if(conf.isUseDropConnect() && training && conf.getLayer().getDropOut() > 0) {
+			inputWeights = Dropout.applyDropConnect(this,GRUParamInitializer.INPUT_WEIGHT_KEY);
 		}
 		
 		//Allocate arrays for activations:
@@ -348,16 +345,21 @@ public class GRU extends BaseRecurrentLayer<org.deeplearning4j.nn.conf.layers.GR
 	@Override
     public double calcL2() {
     	if(!conf.isUseRegularization() || conf.getLayer().getL2() <= 0.0 ) return 0.0;
-    	double l2 = Transforms.pow(getParam(GRUParamInitializer.RECURRENT_WEIGHT_KEY), 2).sum(Integer.MAX_VALUE).getDouble(0)
-    			+ Transforms.pow(getParam(GRUParamInitializer.INPUT_WEIGHT_KEY), 2).sum(Integer.MAX_VALUE).getDouble(0);
-    	return 0.5 * conf.getLayer().getL2() * l2;
+
+		double l2Norm = getParam(GRUParamInitializer.RECURRENT_WEIGHT_KEY).norm2Number().doubleValue();
+		double sumSquaredWeights = l2Norm*l2Norm;
+
+		l2Norm = getParam(GRUParamInitializer.INPUT_WEIGHT_KEY).norm2Number().doubleValue();
+		sumSquaredWeights += l2Norm*l2Norm;
+
+		return 0.5 * conf.getLayer().getL2() * sumSquaredWeights;
     }
 
     @Override
     public double calcL1() {
     	if(!conf.isUseRegularization() || conf.getLayer().getL1() <= 0.0 ) return 0.0;
-        double l1 = Transforms.abs(getParam(GRUParamInitializer.RECURRENT_WEIGHT_KEY)).sum(Integer.MAX_VALUE).getDouble(0)
-        		+ Transforms.abs(getParam(GRUParamInitializer.INPUT_WEIGHT_KEY)).sum(Integer.MAX_VALUE).getDouble(0);
+        double l1 = getParam(GRUParamInitializer.RECURRENT_WEIGHT_KEY).norm1Number().doubleValue()
+        		+ getParam(GRUParamInitializer.INPUT_WEIGHT_KEY).norm1Number().doubleValue();
         return conf.getLayer().getL1() * l1;
     }
 

@@ -19,12 +19,8 @@
 package org.deeplearning4j.optimize.stepfunctions;
 
 import org.deeplearning4j.optimize.api.StepFunction;
-import org.nd4j.linalg.api.buffer.DataBuffer;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.factory.Nd4j;
-
-import javax.naming.directory.SearchControls;
-import java.util.Arrays;
 
 /**
  * Inverse step function

@@ -13,9 +13,7 @@ import org.junit.Test;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.factory.Nd4j;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class TestGradientNormalization {
 
@@ -29,7 +27,9 @@ public class TestGradientNormalization {
                 .gradientNormalization(GradientNormalization.RenormalizeL2PerLayer)
                 .build()).build();
 
-        Layer layer = LayerFactories.getFactory(conf.getLayer()).create(conf);
+        int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+        INDArray params = Nd4j.create(1, numParams);
+        Layer layer =  LayerFactories.getFactory(conf).create(conf, null, 0, params, true);
         Updater updater = UpdaterCreator.getUpdater(layer);
         INDArray weightGrad = Nd4j.rand(10, 20);
         INDArray biasGrad = Nd4j.rand(1, 10);
@@ -39,7 +39,7 @@ public class TestGradientNormalization {
         gradient.setGradientFor(DefaultParamInitializer.WEIGHT_KEY, weightGrad);
         gradient.setGradientFor(DefaultParamInitializer.BIAS_KEY, biasGrad);
 
-        updater.update(layer, gradient, 0);
+        updater.update(layer, gradient, 0, 1);
 
         assertNotEquals(weightGradCopy, weightGrad);
         assertNotEquals(biasGradCopy, biasGrad);
@@ -70,7 +70,9 @@ public class TestGradientNormalization {
                         .gradientNormalization(GradientNormalization.RenormalizeL2PerParamType)
                         .build()).build();
 
-        Layer layer = LayerFactories.getFactory(conf.getLayer()).create(conf);
+        int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+        INDArray params = Nd4j.create(1, numParams);
+        Layer layer =  LayerFactories.getFactory(conf).create(conf, null, 0, params, true);
         Updater updater = UpdaterCreator.getUpdater(layer);
         INDArray weightGrad = Nd4j.rand(10, 20);
         INDArray biasGrad = Nd4j.rand(1, 10);
@@ -80,7 +82,7 @@ public class TestGradientNormalization {
         gradient.setGradientFor(DefaultParamInitializer.WEIGHT_KEY, weightGrad);
         gradient.setGradientFor(DefaultParamInitializer.BIAS_KEY, biasGrad);
 
-        updater.update(layer, gradient, 0);
+        updater.update(layer, gradient, 0, 1);
 
         INDArray normWeightsExpected = weightGradCopy.div(weightGradCopy.norm2Number());
         INDArray normBiasExpected = biasGradCopy.div(biasGradCopy.norm2Number());
@@ -101,7 +103,9 @@ public class TestGradientNormalization {
                         .gradientNormalizationThreshold(threshold)
                         .build()).build();
 
-        Layer layer = LayerFactories.getFactory(conf.getLayer()).create(conf);
+        int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+        INDArray params = Nd4j.create(1, numParams);
+        Layer layer =  LayerFactories.getFactory(conf).create(conf, null, 0, params, true);
         Updater updater = UpdaterCreator.getUpdater(layer);
         INDArray weightGrad = Nd4j.rand(10, 20).muli(10).subi(5);
         INDArray biasGrad = Nd4j.rand(1, 10).muli(10).subi(5);
@@ -111,7 +115,7 @@ public class TestGradientNormalization {
         gradient.setGradientFor(DefaultParamInitializer.WEIGHT_KEY, weightGrad);
         gradient.setGradientFor(DefaultParamInitializer.BIAS_KEY, biasGrad);
 
-        updater.update(layer, gradient, 0);
+        updater.update(layer, gradient, 0, 1);
 
         assertNotEquals(weightGradCopy, weightGrad);
         assertNotEquals(biasGradCopy, biasGrad);
@@ -149,7 +153,9 @@ public class TestGradientNormalization {
                             .gradientNormalizationThreshold(threshold)
                             .build()).build();
 
-            Layer layer = LayerFactories.getFactory(conf.getLayer()).create(conf);
+            int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+            INDArray params = Nd4j.create(1, numParams);
+            Layer layer =  LayerFactories.getFactory(conf).create(conf, null, 0, params, true);
             Updater updater = UpdaterCreator.getUpdater(layer);
             INDArray weightGrad = Nd4j.rand(10, 20).muli((t==0 ? 0.05 : 10));
             INDArray biasGrad = Nd4j.rand(1, 10).muli((t==0 ? 0.05 : 10));
@@ -163,7 +169,7 @@ public class TestGradientNormalization {
             if(t==0) assertTrue(layerGradL2 < threshold);
             else assertTrue(layerGradL2 > threshold);
 
-            updater.update(layer, gradient, 0);
+            updater.update(layer, gradient, 0, 1);
 
             if(t==0) {
                 //norm2 < threshold -> no change
@@ -197,7 +203,9 @@ public class TestGradientNormalization {
                         .gradientNormalizationThreshold(threshold)
                         .build()).build();
 
-        Layer layer = LayerFactories.getFactory(conf.getLayer()).create(conf);
+        int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+        INDArray params = Nd4j.create(1, numParams);
+        Layer layer =  LayerFactories.getFactory(conf).create(conf, null, 0, params, true);
         Updater updater = UpdaterCreator.getUpdater(layer);
         INDArray weightGrad = Nd4j.rand(10, 20).muli(0.05);
         INDArray biasGrad = Nd4j.rand(1, 10).muli(10);
@@ -212,7 +220,7 @@ public class TestGradientNormalization {
         assertTrue(weightL2 < threshold);
         assertTrue(biasL2 > threshold);
 
-        updater.update(layer, gradient, 0);
+        updater.update(layer, gradient, 0, 1);
 
         assertEquals(weightGradCopy, weightGrad);   //weight norm2 < threshold -> no change
         assertNotEquals(biasGradCopy, biasGrad);    //bias norm2 > threshold -> rescale

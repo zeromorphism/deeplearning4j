@@ -20,33 +20,18 @@ package org.deeplearning4j.spark.impl.layer;
 
 
 import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.mllib.regression.LabeledPoint;
 import org.deeplearning4j.datasets.iterator.impl.IrisDataSetIterator;
 import org.deeplearning4j.eval.Evaluation;
-import org.deeplearning4j.nn.api.Layer;
 import org.deeplearning4j.nn.api.OptimizationAlgorithm;
-import org.deeplearning4j.nn.conf.MultiLayerConfiguration;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
-import org.deeplearning4j.nn.conf.override.ConfOverride;
 import org.deeplearning4j.nn.layers.OutputLayer;
-import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
 import org.deeplearning4j.nn.weights.WeightInit;
 import org.deeplearning4j.spark.BaseSparkTest;
-import org.deeplearning4j.spark.impl.multilayer.SparkDl4jMultiLayer;
-import org.deeplearning4j.spark.util.MLLibUtil;
 import org.junit.Test;
-import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.dataset.DataSet;
-import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.lossfunctions.LossFunctions;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.io.File;
 import java.util.List;
-import java.util.UUID;
-
-import static org.junit.Assert.assertEquals;
 
 
 /**
@@ -54,14 +39,8 @@ import static org.junit.Assert.assertEquals;
  */
 public class TestSparkLayer extends BaseSparkTest {
 
-    private static final Logger log = LoggerFactory.getLogger(TestSparkLayer.class);
-
-
-
     @Test
     public void testIris2() throws Exception {
-
-
         NeuralNetConfiguration conf = new NeuralNetConfiguration.Builder()
                 .optimizationAlgo(OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT)
                 .iterations(10)
@@ -80,24 +59,12 @@ public class TestSparkLayer extends BaseSparkTest {
         d.shuffle();
         List<DataSet> next = d.asList();
 
-
         JavaRDD<DataSet> data = sc.parallelize(next);
-
-
 
         OutputLayer network2 =(OutputLayer) master.fitDataSet(data);
 
-        INDArray params = network2.params();
-        File writeTo = new File(UUID.randomUUID().toString());
-        Nd4j.writeTxt(params, writeTo.getAbsolutePath(), ",");
-        INDArray load = Nd4j.readTxt(writeTo.getAbsolutePath());
-        assertEquals(params, load);
-        writeTo.delete();
         Evaluation evaluation = new Evaluation();
         evaluation.eval(d.getLabels(), network2.output(d.getFeatureMatrix()));
         System.out.println(evaluation.stats());
     }
-
-
-
 }

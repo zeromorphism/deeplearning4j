@@ -5,36 +5,79 @@ import org.apache.commons.math3.util.FastMath;
 import org.deeplearning4j.nn.api.Layer;
 import org.deeplearning4j.nn.api.Updater;
 import org.deeplearning4j.nn.conf.GradientNormalization;
+import org.deeplearning4j.nn.conf.LearningRatePolicy;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.gradient.Gradient;
-import org.deeplearning4j.nn.params.DefaultParamInitializer;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.api.ops.impl.accum.Norm2;
 import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.indexing.BooleanIndexing;
+import org.nd4j.linalg.indexing.NDArrayIndex;
 import org.nd4j.linalg.indexing.conditions.AbsValueGreaterThan;
 import org.nd4j.linalg.indexing.conditions.Condition;
 import org.nd4j.linalg.learning.GradientUpdater;
 import org.nd4j.linalg.ops.transforms.Transforms;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * @author Adam Gibson
  */
 public abstract class BaseUpdater implements Updater {
-    protected Map<String, GradientUpdater> updaterForVariable = new HashMap<>();
-
+    protected Map<String, GradientUpdater> updaterForVariable = new LinkedHashMap<>();
+    protected INDArray viewArray;
 
     @Override
-    public void update(Layer layer, Gradient gradient, int iteration) {
+    public void setStateViewArray(Layer layer, INDArray viewArray, boolean initialize) {
+        //Need to split this up into each parameter type...
+
+        Map<String,INDArray> params = layer.paramTable();
+        int count = 0;
+        for(Map.Entry<String,INDArray> entry : params.entrySet()){
+            INDArray paramsArray = entry.getValue();
+            GradientUpdater gu = init(entry.getKey(), layer);
+            int thisSize = gu.stateSizeForInputSize(entry.getValue().length());
+            INDArray subset = viewArray.get(NDArrayIndex.point(0), NDArrayIndex.interval(count, count+thisSize));
+            gu.setStateViewArray(subset, paramsArray.shape(), paramsArray.ordering(), initialize);
+            count += thisSize;
+        }
+    }
+
+    @Override
+    public INDArray getStateViewArray() {
+        return viewArray;
+    }
+
+    @Override
+    public int stateSizeForLayer(Layer layer) {
+        Map<String,INDArray> params = layer.paramTable();
+        int count = 0;
+        for(Map.Entry<String,INDArray> entry : params.entrySet()){
+            GradientUpdater gu = init(entry.getKey(), layer);
+            count += gu.stateSizeForInputSize(entry.getValue().length());
+        }
+        return count;
+    }
+
+    @Override
+    public void update(Layer layer, Gradient gradient, int iteration, int miniBatchSize) {
+        String paramName;
+        INDArray gradientOrig, gradient2;
+        GradientUpdater updater;
+
         preApply(layer, gradient, iteration);
         for (Map.Entry<String, INDArray> gradientPair : gradient.gradientForVariable().entrySet()) {
-            GradientUpdater updater = init(gradientPair.getKey(), gradientPair.getValue(), layer);
-            INDArray gradient2 = updater.getGradient(gradientPair.getValue(), iteration);
-            postApply(layer, gradient2, gradientPair.getKey());
-            gradient.setGradientFor(gradientPair.getKey(), gradient2);
+            paramName = gradientPair.getKey();
+            gradientOrig = gradientPair.getValue();
+            LearningRatePolicy decay = layer.conf().getLearningRatePolicy();
+            if (decay != LearningRatePolicy.None || layer.conf().getLayer().getUpdater() == org.deeplearning4j.nn.conf.Updater.NESTEROVS)
+                applyLrDecayPolicy(decay, layer, iteration, paramName);
+            updater = init(paramName, layer);
+            gradient2 = updater.getGradient(gradientOrig, iteration);
+            postApply(layer, gradient2, paramName, miniBatchSize);
+            gradient.setGradientFor(paramName, gradient2);
         }
     }
 
@@ -45,26 +88,76 @@ public abstract class BaseUpdater implements Updater {
      * @param gradient
      * @param param
      */
-    public void postApply(Layer layer, INDArray gradient, String param) {
+    public void postApply(Layer layer, INDArray gradient, String param, int miniBatchSize) {
         NeuralNetConfiguration conf = layer.conf();
         INDArray params = layer.getParam(param);
-        if (conf.isUseRegularization() && conf.getLayer().getL2() > 0 && !(param.equals(DefaultParamInitializer.BIAS_KEY)))
-            gradient.addi(params.mul(conf.getLayer().getL2()));    //dC/dw = dC0/dw + lambda/n * w where C0 is pre-l2 cost function
-        if (conf.isUseRegularization() && conf.getLayer().getL1() > 0 && !(param.equals(DefaultParamInitializer.BIAS_KEY)))
-            gradient.addi(Transforms.sign(params).muli(conf.getLayer().getL1()));
+        if (conf.isUseRegularization() && conf.getL2ByParam(param) > 0)
+            gradient.addi(params.mul(conf.getL2ByParam(param)));    //dC/dw = dC0/dw + lambda/n * w where C0 is pre-l2 cost function
+        if (conf.isUseRegularization() && conf.getL1ByParam(param) > 0)
+            gradient.addi(Transforms.sign(params).muli(conf.getL1ByParam(param)));
         if (conf.isMiniBatch())
-            gradient.divi(layer.getInputMiniBatchSize());
-        if (conf.isConstrainGradientToUnitNorm())
-            gradient.divi(gradient.norm2(Integer.MAX_VALUE));
+            gradient.divi(miniBatchSize);
 
     }
 
     /**
-     * Apply gradient normalization: scale based on L2, clipping etc.
+     *  Update momentum if schedule exist
+     */
+    public void applyMomentumDecayPolicy(Layer layer, int iteration, String variable){
+        NeuralNetConfiguration conf = layer.conf();
+        if (conf.getLayer().getMomentumSchedule().containsKey(iteration)) {
+            conf.getLayer().setMomentum(conf.getLayer().getMomentumSchedule().get(iteration));
+            if(updaterForVariable.get(variable) != null)
+                updaterForVariable.get(variable).update(conf.getLearningRateByParam(variable), conf.getLayer().getMomentumSchedule().get(iteration));
+        }
+    }
+
+    /**
+     *  Update learning rate based on policy
+     */
+    public void applyLrDecayPolicy(LearningRatePolicy decay, Layer layer, int iteration, String variable){
+        NeuralNetConfiguration conf = layer.conf();
+        double decayRate = layer.conf().getLrPolicyDecayRate();
+        double lr = conf.getLearningRateByParam(variable);
+        switch(decay){
+            case Exponential:
+                conf.setLearningRateByParam(variable, lr * Math.pow(decayRate, iteration));
+                break;
+            case Inverse:
+                conf.setLearningRateByParam(variable, lr / Math.pow((1+decayRate * iteration), conf.getLrPolicyPower()));
+                break;
+            case Step:
+                conf.setLearningRateByParam(variable, lr * Math.pow(decayRate, Math.floor(iteration/conf.getLrPolicySteps())));
+                break;
+            case Poly:
+                conf.setLearningRateByParam(variable, lr * Math.pow((1 - ((double)iteration)/conf.getNumIterations()), conf.getLrPolicyPower()));
+                break;
+            case Sigmoid:
+                conf.setLearningRateByParam(variable, lr / (1 + Math.exp(-decayRate * (iteration - conf.getLrPolicySteps()))));
+                break;
+            case Schedule:
+                if (conf.getLayer().getLearningRateSchedule().containsKey(iteration))
+                    conf.setLearningRateByParam(variable, conf.getLayer().getLearningRateSchedule().get(iteration));
+                break;
+        }
+        if(layer.conf().getLayer().getUpdater() == org.deeplearning4j.nn.conf.Updater.NESTEROVS)
+            applyMomentumDecayPolicy(layer, iteration, variable);
+        else if(updaterForVariable.get(variable) != null)
+            updaterForVariable.get(variable).update(conf.getLearningRateByParam(variable));
+    }
+
+    /**
+     *  Apply gradient normalization: scale based on L2, clipping etc.
+     *  RenormalizeL2PerLayer: divide all layer gradients by L2 to rescale
+     *  RenormalizeL2PerParamType: divide each parameter type gradient in a layer by L2 to rescale
+     *  ClipElementWiseAbsoluteValue: clip gradients per-element
+     *  ClipL2PerLayer: same as RenormalizeL2PerLayer but limited by gradient L2 norm for the layer meeting a threshold
+     *  ClipL2PerParamType: same as RenormalizeL2PerParamType but limited by gradient L2 norm for each parameter type in a layer meeting a threshold
      */
     public void preApply(Layer layer, Gradient gradient, int iteration) {
+
         GradientNormalization normalization = layer.conf().getLayer().getGradientNormalization();
-        if (normalization == null || normalization == GradientNormalization.None ) return;  //no op
+        if (normalization == null || normalization == GradientNormalization.None) return;  //no op
 
         final double threshold = layer.conf().getLayer().getGradientNormalizationThreshold();
 
@@ -129,8 +222,38 @@ public abstract class BaseUpdater implements Updater {
         }
     }
 
+
     public abstract void init();
 
-    public abstract GradientUpdater init(String variable, INDArray gradient, Layer layer);
+    public abstract GradientUpdater init(String variable, Layer layer);
 
+    @Override
+    public boolean equals(Object other){
+        if(!(other instanceof BaseUpdater)) return false;
+        return updaterForVariable.equals(((BaseUpdater)other).updaterForVariable);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = 19;
+        result = 31 * result + (updaterForVariable == null? 0 : updaterForVariable.hashCode());
+        return result;
+    }
+
+    @Override
+    public Updater clone(){
+        Map<String,GradientUpdater> newMap = new HashMap<>();
+        for (Map.Entry<String, GradientUpdater> entry : updaterForVariable.entrySet()) {
+            newMap.put(entry.getKey(), entry.getValue().getAggregator(true).getUpdater());
+        }
+
+        BaseUpdater updater;
+        try{
+            updater = this.getClass().getConstructor().newInstance();
+        }catch (Exception e){
+            throw new RuntimeException(e);
+        }
+        updater.updaterForVariable = newMap;
+        return updater;
+    }
 }

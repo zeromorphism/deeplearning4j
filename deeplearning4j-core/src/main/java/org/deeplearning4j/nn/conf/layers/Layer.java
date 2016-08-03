@@ -18,22 +18,21 @@
 
 package org.deeplearning4j.nn.conf.layers;
 
-import java.io.Serializable;
-import java.util.HashMap;
-import java.util.Map;
-
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.annotation.JsonTypeInfo.As;
 import com.fasterxml.jackson.annotation.JsonTypeInfo.Id;
-
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
 import org.deeplearning4j.nn.conf.GradientNormalization;
+import org.deeplearning4j.nn.conf.LearningRatePolicy;
 import org.deeplearning4j.nn.conf.Updater;
 import org.deeplearning4j.nn.conf.distribution.Distribution;
 import org.deeplearning4j.nn.weights.WeightInit;
+
+import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * A neural network layer.
@@ -42,49 +41,60 @@ import org.deeplearning4j.nn.weights.WeightInit;
 @JsonSubTypes(value={
         @JsonSubTypes.Type(value = AutoEncoder.class, name = "autoEncoder"),
         @JsonSubTypes.Type(value = ConvolutionLayer.class, name = "convolution"),
-        @JsonSubTypes.Type(value = ImageLSTM.class, name = "imageLSTM"),
         @JsonSubTypes.Type(value = GravesLSTM.class, name = "gravesLSTM"),
+        @JsonSubTypes.Type(value = GravesBidirectionalLSTM.class, name = "gravesBidirectionalLSTM"),
         @JsonSubTypes.Type(value = GRU.class, name = "gru"),
         @JsonSubTypes.Type(value = OutputLayer.class, name = "output"),
         @JsonSubTypes.Type(value = RnnOutputLayer.class, name = "rnnoutput"),
         @JsonSubTypes.Type(value = RBM.class, name = "RBM"),
         @JsonSubTypes.Type(value = DenseLayer.class, name = "dense"),
-        @JsonSubTypes.Type(value = RecursiveAutoEncoder.class, name = "recursiveAutoEncoder"),
         @JsonSubTypes.Type(value = SubsamplingLayer.class, name = "subsampling"),
+        @JsonSubTypes.Type(value = BatchNormalization.class, name = "batchNormalization"),
+        @JsonSubTypes.Type(value = LocalResponseNormalization.class, name = "localResponseNormalization"),
+        @JsonSubTypes.Type(value = EmbeddingLayer.class, name = "embedding"),
+        @JsonSubTypes.Type(value = ActivationLayer.class, name = "activation")
         })
 @Data
 @NoArgsConstructor
 public abstract class Layer implements Serializable, Cloneable {
+    protected String layerName;
     protected String activationFunction;
     protected WeightInit weightInit;
     protected double biasInit;
     protected Distribution dist;
     protected double learningRate;
-    protected double lrScoreBasedDecay;
+    protected double biasLearningRate;
+    //learning rate after n iterations
+    protected Map<Integer,Double> learningRateSchedule;
     protected double momentum;
     //momentum after n iterations
-    protected Map<Integer,Double> momentumAfter;
+    protected Map<Integer,Double> momentumSchedule;
     protected double l1;
     protected double l2;
+    protected double biasL1;
+    protected double biasL2;
     protected double dropOut;
     protected Updater updater;
     //adadelta - weight for how much to consider previous history
     protected double rho;
     protected double rmsDecay;
-    protected double adamMeanDecay = 0.9;
-    protected double adamVarDecay = 0.999;
+    protected double adamMeanDecay;
+    protected double adamVarDecay;
     protected GradientNormalization gradientNormalization = GradientNormalization.None; //Clipping, rescale based on l2 norm, etc
     protected double gradientNormalizationThreshold = 1.0;   //Threshold for l2 and element-wise gradient clipping
 
+
     public Layer(Builder builder) {
+        this.layerName = builder.layerName;
     	this.activationFunction = builder.activationFunction;
     	this.weightInit = builder.weightInit;
         this.biasInit = builder.biasInit;
     	this.dist = builder.dist;
         this.learningRate = builder.learningRate;
-        this.lrScoreBasedDecay = builder.lrScoreBasedDecay;
+        this.biasLearningRate = builder.biasLearningRate;
+        this.learningRateSchedule = builder.learningRateSchedule;
         this.momentum = builder.momentum;
-        this.momentumAfter = builder.momentumAfter;
+        this.momentumSchedule = builder.momentumAfter;
         this.l1 = builder.l1;
         this.l2 = builder.l2;
         this.dropOut = builder.dropOut;
@@ -102,21 +112,24 @@ public abstract class Layer implements Serializable, Cloneable {
         try {
             Layer clone = (Layer) super.clone();
             if(clone.dist != null) clone.dist = clone.dist.clone();
-            if(clone.momentumAfter != null) clone.momentumAfter = new HashMap<>(clone.momentumAfter);
+            if(clone.learningRateSchedule != null) clone.learningRateSchedule = new HashMap<>(clone.learningRateSchedule);
+            if(clone.momentumSchedule != null) clone.momentumSchedule = new HashMap<>(clone.momentumSchedule);
             return clone;
         } catch (CloneNotSupportedException e) {
             throw new RuntimeException(e);
         }
     }
 
-
+    @SuppressWarnings("unchecked")
     public abstract static class Builder<T extends Builder<T>> {
+        protected String layerName = null;
         protected String activationFunction = null;
         protected WeightInit weightInit = null;
         protected double biasInit = Double.NaN;
         protected Distribution dist = null;
         protected double learningRate = Double.NaN;
-        protected double lrScoreBasedDecay = Double.NaN;
+        protected double biasLearningRate = Double.NaN;
+        protected Map<Integer,Double> learningRateSchedule = null;
         protected double momentum = Double.NaN;
         protected Map<Integer,Double> momentumAfter = null;
         protected double l1 = Double.NaN;
@@ -129,6 +142,17 @@ public abstract class Layer implements Serializable, Cloneable {
         protected double adamVarDecay = Double.NaN;
         protected GradientNormalization gradientNormalization = null;
         protected double gradientNormalizationThreshold = Double.NaN;
+        protected LearningRatePolicy learningRatePolicy = null;
+
+
+        /**Layer name assigns layer string name.
+         * Allows easier differentiation between layers.
+         */
+        public T name(String layerName) {
+            this.layerName = layerName;
+            return (T) this;
+        }
+
 
         /**Layer activation function.
          * Typical values include:<br>
@@ -161,13 +185,21 @@ public abstract class Layer implements Serializable, Cloneable {
         	return (T) this;
         }
 
+        /** Learning rate. Defaults to 1e-1*/
         public T learningRate(double learningRate){
             this.learningRate = learningRate;
             return (T)this;
         }
 
-        public T learningRateScoreBasedDecayRate(double lrScoreBasedDecay) {
-            this.lrScoreBasedDecay = lrScoreBasedDecay;
+        /** Bias learning rate. Set this to apply a different learning rate to the bias*/
+        public T biasLearningRate(double biasLearningRate){
+            this.biasLearningRate = biasLearningRate;
+            return (T)this;
+        }
+
+        /** Learning rate schedule. Map of the iteration to the learning rate to apply at that iteration. */
+        public T learningRateSchedule(Map<Integer, Double> learningRateSchedule) {
+            this.learningRateSchedule = learningRateSchedule;
             return (T) this;
         }
 
@@ -188,12 +220,13 @@ public abstract class Layer implements Serializable, Cloneable {
             return (T) this;
         }
 
+        /** Momentum rate. */
         public T momentum(double momentum) {
             this.momentum = momentum;
             return (T)this;
         }
 
-        /** Momentum (step) schedule */
+        /** Momentum schedule. Map of the iteration to the momentum rate to apply at that iteration. */
         public T momentumAfter(Map<Integer, Double> momentumAfter) {
             this.momentumAfter = momentumAfter;
             return (T) this;
@@ -208,6 +241,10 @@ public abstract class Layer implements Serializable, Cloneable {
             return (T) this;
         }
 
+        /**
+         * Ada delta coefficient
+         * @param rho
+         */
         public T rho(double rho) {
             this.rho = rho;
             return (T) this;
@@ -226,6 +263,7 @@ public abstract class Layer implements Serializable, Cloneable {
             return (T) this;
         }
 
+        /** Variance decay rate for Adam updater. Only applies if using .updater(Updater.ADAM) */
         public T adamVarDecay(double adamVarDecay) {
             this.adamVarDecay = adamVarDecay;
             return (T) this;
@@ -249,6 +287,16 @@ public abstract class Layer implements Serializable, Cloneable {
             this.gradientNormalizationThreshold = threshold;
             return (T) this;
         }
+
+        /** Learning rate decay policy. Used to adapt learning rate based on policy.
+         * @param policy Type of policy to use. Defaults to None.
+         * @see org.deeplearning4j.nn.conf.GradientNormalization
+         */
+        public T learningRateDecayPolicy(LearningRatePolicy policy){
+            this.learningRatePolicy = policy;
+            return (T) this;
+        }
+
 
         public abstract <E extends Layer> E build();
     }

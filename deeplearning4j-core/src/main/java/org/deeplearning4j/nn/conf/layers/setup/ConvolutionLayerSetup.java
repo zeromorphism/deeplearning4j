@@ -1,13 +1,11 @@
 package org.deeplearning4j.nn.conf.layers.setup;
 
 
-import javassist.bytecode.analysis.SubroutineScanner;
 import org.deeplearning4j.nn.conf.MultiLayerConfiguration;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.conf.layers.*;
-import org.deeplearning4j.nn.conf.layers.ConvolutionLayer;
-import org.deeplearning4j.nn.conf.preprocessor.CnnToFeedForwardPreProcessor;
-import org.deeplearning4j.nn.conf.preprocessor.FeedForwardToCnnPreProcessor;
+import org.deeplearning4j.nn.conf.preprocessor.*;
+import org.deeplearning4j.nn.layers.convolution.KernelValidationUtil;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -31,25 +29,43 @@ import java.util.Map;
  * such as when a shift from
  * convolution to dense happens.
  *
- *
- * @author Adam Gibson
  */
 public class ConvolutionLayerSetup {
 
-    private  int lastHeight = -1;
-    private  int lastWidth = -1;
-    private  int lastOutChannels = -1;
-    private int numLayers = -1;
-    private Map<Integer,int[]> outSizesEachLayer = new HashMap<>();
-    private Map<Integer,Integer> nInForLayer = new HashMap<>();
+    public static final String CONVOLUTION_LAYER = "ConvolutionLayer";
+    public static final String LOCAL_RESPONSE_NORMALIZATION = "LocalResponseNormalization";
+    public static final String SUBSAMPLING_LAYER = "SubsamplingLayer";
+    public static final String RECURSIVE_AUTO_ENCODER = "RecursiveAutoEncoder";
+    public static final String RBM = "RBM";
+    public static final String DENSE_LAYER = "DenseLayer";
+    public static final String OUTPUT_LAYER = "OutputLayer";
+    public static final String GRAVES_LSTM = "GravesLSTM";
+    public static final String GRAVES_BIDIRECTIONAL_LSTM = "GravesBidirectionalLSTM";
+    public static final String RNN_OUTPUT_LAYER = "RnnOutputLayer";
+    public static final String ACTIVATION_LAYER = "ActivationLayer";
+    public static final String BATCH_NORMALIZATION = "BatchNormalization";
+    protected int lastHeight = -1;
+    protected int lastWidth = -1;
+    protected int lastOutChannels = -1;
+    protected int lastnOut = -1;
+    protected int numLayers = -1;
+    protected String inLayerName;
+    protected String outLayerName;
+    protected Map<String,int[]> nOutsPerLayer = new HashMap<>();
+    protected Map<String,Integer> nInsPerLayer = new HashMap<>();
+    protected MultiLayerConfiguration.Builder conf;
+    protected boolean useCNN = true;
+
     /**
      * Take in the configuration
-     * @param conf the configuration
+     * @param builder the configuration builder
      * @param height initial height of the data
      * @param width initial width of the data
      * @param channels initial number of channels in the data
      */
-    public ConvolutionLayerSetup(MultiLayerConfiguration.Builder conf,int height,int width,int channels) {
+
+    public ConvolutionLayerSetup(MultiLayerConfiguration.Builder builder,int height,int width,int channels) {
+        conf = builder;
         lastHeight = height;
         lastWidth = width;
         lastOutChannels = channels;
@@ -57,232 +73,360 @@ public class ConvolutionLayerSetup {
         if(conf instanceof NeuralNetConfiguration.ListBuilder) {
             NeuralNetConfiguration.ListBuilder listBuilder = (NeuralNetConfiguration.ListBuilder) conf;
             numLayers = listBuilder.getLayerwise().size();
-        }
-        else
+        } else {
             numLayers = conf.getConfs().size();
-        boolean alreadySet = false;
+        }
+        for(int i = 0; i < numLayers-1; i++) {
+            Layer inputLayer = getLayer(i,conf);
+            Layer outputLayer = getLayer(i+1,conf);
+            updateLayerInputs(i, inputLayer, outputLayer);
+        }
+    }
 
-        for(int i = 0; i < numLayers; i++) {
-            alreadySet = false;
-            Layer curr = getLayer(i,conf);
-            //cnn -> subsampling
-            if(i == 0 || i < numLayers - 2 && getLayer(i, conf) instanceof ConvolutionLayer) {
-                ConvolutionLayer convolutionLayer = (ConvolutionLayer)getLayer(i,conf);
-                //ensure the number of in channels is set for the data
-                if(i == 0)
-                    convolutionLayer.setNIn(channels);
-                Layer next = getLayer(i + 1,conf);
-                //cnn -> feedforward
-                if(next instanceof DenseLayer || next instanceof OutputLayer) {
-                    //set the feed forward wrt the out channels of the current convolution layer
-                    //set the rows and columns (height/width) wrt the kernel size of the current layer
-                    if(i > 0) {
-                        int[] outWidthAndHeight = getConvolutionOutputSize(new int[]{lastHeight, lastWidth}, convolutionLayer.getKernelSize(), convolutionLayer.getPadding(), convolutionLayer.getStride());
+    private void storeNInAndNOut(String inName, int out){
+        nInsPerLayer.put(inName, out);
+        nOutsPerLayer.put(inLayerName, new int[]{lastHeight, lastWidth, lastOutChannels});
+    }
 
-                        conf.inputPreProcessor(i + 1, new CnnToFeedForwardPreProcessor(
-                                outWidthAndHeight[0]
-                                , outWidthAndHeight[1], convolutionLayer.getNOut()));
+    private void updateLayerInputs(int i, Layer inputLayer, Layer outputLayer){
+        int lastLayerNumber = numLayers - 1;
+        inLayerName = (inputLayer.getLayerName() != null) ? inputLayer.getLayerName(): Integer.toString(i);
+        outLayerName = (outputLayer.getLayerName() != null) ? outputLayer.getLayerName(): Integer.toString(i+1);
+
+        if(i < lastLayerNumber){
+            switch (inputLayer.getClass().getSimpleName()){
+                case CONVOLUTION_LAYER:
+                    ConvolutionLayer convolutionLayer = (ConvolutionLayer) inputLayer;
+                    if(i == 0) {
+                        conf.inputPreProcessor(i, new FeedForwardToCnnPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                        lastnOut = convolutionLayer.getNOut();
+                        convolutionLayer.setNIn(lastOutChannels);
                     }
-                    else
-                        conf.inputPreProcessor(i + 1,new CnnToFeedForwardPreProcessor(
-                                height
-                                ,width,convolutionLayer.getNOut()));
-                    //set the number of inputs wrt the current convolution layer
-                    FeedForwardLayer o = (FeedForwardLayer) next;
-                    //need to infer nins from first input size
-                    int[] outWidthAndHeight = getConvolutionOutputSize(new int[]{lastHeight, lastWidth}, convolutionLayer.getKernelSize(), convolutionLayer.getPadding(), convolutionLayer.getStride());
-                    outSizesEachLayer.put(i,outWidthAndHeight);
-                    int outRows = outWidthAndHeight[0];
-                    int outCols = outWidthAndHeight[1];
-                    lastHeight = outRows;
-                    lastWidth = outCols;
+                    getConvolutionOutputSize(new int[]{lastHeight, lastWidth}, convolutionLayer.getKernelSize(), convolutionLayer.getPadding(), convolutionLayer.getStride());
                     lastOutChannels = convolutionLayer.getNOut();
-                    int nIn = outCols * outRows * convolutionLayer.getNOut();
-                    nInForLayer.put(i,nIn);
-                    o.setNIn(nIn);
-                    alreadySet = true;
+                    switch (outputLayer.getClass().getSimpleName()) {
+                        case CONVOLUTION_LAYER:
+                            ConvolutionLayer nextConv = (ConvolutionLayer) outputLayer;
+                            //set next layer's convolution input channels to be equal to this layer's out channels
+                            lastOutChannels = lastnOut = convolutionLayer.getNOut();
+                            storeNInAndNOut(inLayerName, lastnOut);
+                            nextConv.setNIn(lastnOut);
+                            break;
+                        case LOCAL_RESPONSE_NORMALIZATION:
+                        case SUBSAMPLING_LAYER:
+                            lastOutChannels = lastnOut = convolutionLayer.getNOut();
+                            storeNInAndNOut(inLayerName, lastnOut);
+                            break;
+                        case RECURSIVE_AUTO_ENCODER:
+                        case RBM:
+                        case DENSE_LAYER:
+                        case OUTPUT_LAYER:
+                            FeedForwardLayer feedForwardLayer = (FeedForwardLayer) outputLayer;
+                            lastOutChannels = convolutionLayer.getNOut();
+                            lastnOut = lastHeight * lastWidth * lastOutChannels;
+                            storeNInAndNOut(inLayerName, lastnOut); // required to be before inputPreProcessor to update lastHeight and lastWidth
+                            feedForwardLayer.setNIn(lastnOut);
+                            conf.inputPreProcessor(i + 1, new CnnToFeedForwardPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            break;
+                        case GRAVES_LSTM:
+                        case GRAVES_BIDIRECTIONAL_LSTM:
+                        case RNN_OUTPUT_LAYER:
+                            feedForwardLayer = (FeedForwardLayer) outputLayer;
+                            lastnOut = lastHeight * lastWidth * lastOutChannels;
+                            storeNInAndNOut(inLayerName, lastnOut);
+                            feedForwardLayer.setNIn(lastnOut);
+                            conf.inputPreProcessor(i + 1, new CnnToRnnPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            break;
+                        case ACTIVATION_LAYER:
+                            feedForwardLayer = (ActivationLayer) outputLayer;
+                            lastOutChannels = lastnOut = convolutionLayer.getNOut();
+                            storeNInAndNOut(inLayerName, lastnOut);
+                            feedForwardLayer.setNOut(lastnOut);
+                            useCNN = true;
+                            break;
+                        case BATCH_NORMALIZATION:
+                            feedForwardLayer= (BatchNormalization) outputLayer;
+                            lastOutChannels = lastnOut = convolutionLayer.getNOut();
+                            storeNInAndNOut(inLayerName, lastnOut);
+                            feedForwardLayer.setNOut(lastnOut);
+                            useCNN = true;
+                            break;
 
-
-                }
-                //cnn -> subsampling
-                else if(next instanceof SubsamplingLayer) {
-                    SubsamplingLayer subsamplingLayer = (SubsamplingLayer) next;
-                    // subsamplingLayer.setKernelSize(convolutionLayer.getKernelSize());
-                    if(subsamplingLayer.getPadding() == null)
-                        subsamplingLayer.setPadding(convolutionLayer.getPadding());
-                }
-                //cnn -> cnn
-                else if(next instanceof ConvolutionLayer) {
-                    ConvolutionLayer nextConv = (ConvolutionLayer) next;
-                    //set next layer's convolution input channels
-                    //to be equal to this layer's out channels
-                    nextConv.setNIn(convolutionLayer.getNOut());
-                }
+                    }
+                    break;
+                case SUBSAMPLING_LAYER:
+                    SubsamplingLayer subsamplingLayer = (SubsamplingLayer) inputLayer;
+                    getConvolutionOutputSize(new int[]{lastHeight, lastWidth}, subsamplingLayer.getKernelSize(), subsamplingLayer.getPadding(), subsamplingLayer.getStride());
+                    if (i == 0) throw new UnsupportedOperationException("Unsupported path: first layer shouldn't be " + inLayerName);
+                    switch (outputLayer.getClass().getSimpleName()) {
+                        case CONVOLUTION_LAYER:
+                            ConvolutionLayer nextConv = (ConvolutionLayer) outputLayer;
+                            storeNInAndNOut(outLayerName, lastOutChannels);
+                            nextConv.setNIn(lastOutChannels);
+                            break;
+                        case SUBSAMPLING_LAYER:
+                            storeNInAndNOut(inLayerName, lastnOut);
+                            break;
+                        case RECURSIVE_AUTO_ENCODER:
+                        case RBM:
+                        case DENSE_LAYER:
+                        case OUTPUT_LAYER:
+                            FeedForwardLayer feedForwardLayer = (FeedForwardLayer) outputLayer;
+                            lastnOut = lastHeight * lastWidth * lastOutChannels;
+                            storeNInAndNOut(outLayerName, lastnOut);
+                            feedForwardLayer.setNIn(lastnOut);
+                            conf.inputPreProcessor(i + 1, new CnnToFeedForwardPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            break;
+                        case GRAVES_LSTM:
+                        case GRAVES_BIDIRECTIONAL_LSTM:
+                        case RNN_OUTPUT_LAYER:
+                            feedForwardLayer = (FeedForwardLayer) outputLayer;
+                            lastnOut = lastHeight * lastWidth * lastOutChannels;
+                            storeNInAndNOut(outLayerName, lastnOut);
+                            feedForwardLayer.setNIn(lastnOut);
+                            conf.inputPreProcessor(i + 1, new CnnToRnnPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            break;
+                        case ACTIVATION_LAYER:
+                        case BATCH_NORMALIZATION:
+                            feedForwardLayer = (FeedForwardLayer) outputLayer;
+                            storeNInAndNOut(inLayerName, lastnOut);
+                            feedForwardLayer.setNOut(lastnOut);
+                            useCNN = true;
+                            break;
+                    }
+                    break;
+                case GRAVES_LSTM:
+                case GRAVES_BIDIRECTIONAL_LSTM:
+                    if (i == 0) throw new UnsupportedOperationException("Apply nIn attribute to the layer configuration for " + inLayerName);
+                    FeedForwardLayer feedForwardLayer = (FeedForwardLayer) inputLayer;
+                    switch (outputLayer.getClass().getSimpleName()) {
+                        // ffn -> ccn
+                        case CONVOLUTION_LAYER:
+                            convolutionLayer = (ConvolutionLayer) outputLayer;
+                            conf.inputPreProcessor(i, new RnnToCnnPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            lastnOut = convolutionLayer.getNOut();
+                            convolutionLayer.setNIn(lastnOut);
+                            break;
+                        case SUBSAMPLING_LAYER:
+                            throw new UnsupportedOperationException("Subsampling Layer should be connected to Convolution, LocalResponseNormalization or BatchNormalization Layer");
+                        case GRAVES_LSTM:
+                        case GRAVES_BIDIRECTIONAL_LSTM:
+                        case RNN_OUTPUT_LAYER:
+                            FeedForwardLayer feedForwardLayer2 = (FeedForwardLayer) outputLayer;
+                            lastnOut = feedForwardLayer.getNOut();
+                            storeNInAndNOut(outLayerName, lastnOut);
+                            feedForwardLayer2.setNIn(lastnOut);
+                            break;
+                        case RECURSIVE_AUTO_ENCODER:
+                        case RBM:
+                        case DENSE_LAYER:
+                        case OUTPUT_LAYER:
+                            feedForwardLayer2 = (FeedForwardLayer) outputLayer;
+                            lastnOut = feedForwardLayer.getNOut();
+                            storeNInAndNOut(outLayerName, lastnOut);
+                            feedForwardLayer2.setNIn(lastnOut);
+                            conf.inputPreProcessor(i+1, new RnnToFeedForwardPreProcessor());
+                            break;
+                        case BATCH_NORMALIZATION: // TODO when implemented put with activation
+                            throw new UnsupportedOperationException("Currently not implemented for " + inLayerName);
+                        case ACTIVATION_LAYER:
+                            feedForwardLayer2 = (FeedForwardLayer) outputLayer;
+                            lastnOut = feedForwardLayer.getNOut();
+                            storeNInAndNOut(outLayerName, lastnOut);
+                            feedForwardLayer2.setNOut(lastnOut);
+                            conf.inputPreProcessor(i+1, new RnnToFeedForwardPreProcessor());
+                            useCNN = false;
+                            break;
+                    }
+                    break;
+                case RECURSIVE_AUTO_ENCODER:
+                case RBM:
+                case DENSE_LAYER:
+                    if (i == 0) throw new UnsupportedOperationException("Apply nIn attribute to the layer configuration for " + inLayerName);
+                    feedForwardLayer = (FeedForwardLayer) inputLayer;
+                    switch (outputLayer.getClass().getSimpleName()) {
+                        case CONVOLUTION_LAYER:
+                            convolutionLayer = (ConvolutionLayer) outputLayer;
+                            conf.inputPreProcessor(i+1, new FeedForwardToCnnPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            lastnOut = lastOutChannels;
+                            convolutionLayer.setNIn(lastnOut);
+                            break;
+                        case SUBSAMPLING_LAYER:
+                            conf.inputPreProcessor(i+1, new FeedForwardToCnnPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            lastnOut = lastOutChannels;
+                            storeNInAndNOut(inLayerName, lastnOut);
+                            break;
+                        case RECURSIVE_AUTO_ENCODER:
+                        case RBM:
+                        case DENSE_LAYER:
+                        case OUTPUT_LAYER:
+                            FeedForwardLayer feedForwardLayer2 = (FeedForwardLayer) outputLayer;
+                            lastnOut = feedForwardLayer.getNOut();
+                            storeNInAndNOut(outLayerName, lastnOut);
+                            feedForwardLayer2.setNIn(lastnOut);
+                            break;
+                        case GRAVES_LSTM:
+                        case GRAVES_BIDIRECTIONAL_LSTM:
+                        case RNN_OUTPUT_LAYER:
+                            feedForwardLayer2 = (FeedForwardLayer) outputLayer;
+                            lastnOut = feedForwardLayer.getNOut();
+                            storeNInAndNOut(outLayerName, lastnOut);
+                            feedForwardLayer2.setNIn(lastnOut);
+                            conf.inputPreProcessor(i+1, new FeedForwardToRnnPreProcessor());
+                            break;
+                        case BATCH_NORMALIZATION:
+                            BatchNormalization bnLayer = (BatchNormalization) outputLayer;
+                            conf.inputPreProcessor(i+1, new FeedForwardToCnnPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            lastnOut = lastOutChannels;
+                            storeNInAndNOut(outLayerName, lastnOut);
+                            bnLayer.setNOut(lastnOut);
+                            break;
+                        case ACTIVATION_LAYER:
+                            feedForwardLayer2 = (FeedForwardLayer) outputLayer;
+                            lastnOut = feedForwardLayer.getNOut();
+                            storeNInAndNOut(outLayerName, lastnOut);
+                            feedForwardLayer2.setNOut(lastnOut);
+                            useCNN = false;
+                            break;
+                    }
+                    break;
+                case ACTIVATION_LAYER:
+                case BATCH_NORMALIZATION:
+                    if (i == 0) throw new UnsupportedOperationException("Unsupported path: first layer shouldn't be " + inLayerName);
+                    switch (outputLayer.getClass().getSimpleName()) {
+                        case CONVOLUTION_LAYER:
+                            convolutionLayer = (ConvolutionLayer) outputLayer;
+                            if(useCNN) {
+                                storeNInAndNOut(outLayerName, lastOutChannels);
+                                convolutionLayer.setNIn(lastnOut);
+                            } else {
+                                conf.inputPreProcessor(i+1, new FeedForwardToCnnPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                                lastnOut = lastOutChannels;
+                                convolutionLayer.setNIn(lastnOut);
+                            }
+                            break;
+                        case SUBSAMPLING_LAYER:
+                            storeNInAndNOut(inLayerName, lastnOut);
+                            break;
+                        case RECURSIVE_AUTO_ENCODER:
+                        case RBM:
+                        case DENSE_LAYER:
+                        case OUTPUT_LAYER:
+                            if(useCNN) {
+                                feedForwardLayer = (FeedForwardLayer) outputLayer;
+                                lastnOut = lastHeight * lastWidth * lastOutChannels;
+                                storeNInAndNOut(outLayerName, lastnOut); // required to be before inputPreProcessor to update lastHeight and lastWidth
+                                feedForwardLayer.setNIn(lastnOut);
+                                conf.inputPreProcessor(i + 1, new CnnToFeedForwardPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            } else {
+                                feedForwardLayer = (FeedForwardLayer) outputLayer;
+                                storeNInAndNOut(outLayerName, lastnOut);
+                                feedForwardLayer.setNIn(lastnOut);
+                            }
+                            break;
+                        case GRAVES_LSTM:
+                        case GRAVES_BIDIRECTIONAL_LSTM:
+                        case RNN_OUTPUT_LAYER:
+                            if(useCNN) {
+                                feedForwardLayer = (FeedForwardLayer) outputLayer;
+                                lastnOut = lastHeight * lastWidth * lastOutChannels;
+                                storeNInAndNOut(outLayerName, lastnOut);
+                                feedForwardLayer.setNIn(lastnOut);
+                                conf.inputPreProcessor(i + 1, new CnnToRnnPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            } else {
+                                feedForwardLayer = (FeedForwardLayer) outputLayer;
+                                storeNInAndNOut(outLayerName, lastnOut);
+                                feedForwardLayer.setNIn(lastnOut);
+                                conf.inputPreProcessor(i+1, new FeedForwardToRnnPreProcessor());
+                            }
+                            break;
+                        case BATCH_NORMALIZATION:
+                        case ACTIVATION_LAYER:
+                            feedForwardLayer = (FeedForwardLayer) outputLayer;
+                            storeNInAndNOut(outLayerName, lastnOut); // required to be before inputPreProcessor to update lastHeight and lastWidth
+                            feedForwardLayer.setNOut(lastnOut);
+                            break;
+                        case LOCAL_RESPONSE_NORMALIZATION:
+                            throw new UnsupportedOperationException("LocalResponse should not follow " + inLayerName);
+                    }
+                    break;
+                case LOCAL_RESPONSE_NORMALIZATION:
+                    if (i == 0) throw new UnsupportedOperationException("Unsupported path: first layer shouldn't be " + inLayerName);
+                    switch (outputLayer.getClass().getSimpleName()) {
+                        //lrn -> cnn
+                        case CONVOLUTION_LAYER:
+                            ConvolutionLayer nextConv = (ConvolutionLayer) outputLayer;
+                            storeNInAndNOut(outLayerName, lastOutChannels);
+                            nextConv.setNIn(lastnOut);
+                            break;
+                        //lrn -> feedforward || rnn
+                        case RECURSIVE_AUTO_ENCODER:
+                        case RBM:
+                        case DENSE_LAYER:
+                        case OUTPUT_LAYER:
+                            feedForwardLayer = (FeedForwardLayer) outputLayer;
+                            lastnOut = lastHeight * lastWidth * lastOutChannels;
+                            storeNInAndNOut(outLayerName, lastnOut); // required to be before inputPreProcessor to update lastHeight and lastWidth
+                            feedForwardLayer.setNIn(lastnOut);
+                            conf.inputPreProcessor(i + 1, new CnnToFeedForwardPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            break;
+                        case GRAVES_LSTM:
+                        case GRAVES_BIDIRECTIONAL_LSTM:
+                        case RNN_OUTPUT_LAYER:
+                            feedForwardLayer = (FeedForwardLayer) outputLayer;
+                            lastnOut = lastHeight * lastWidth * lastOutChannels;
+                            storeNInAndNOut(outLayerName, lastnOut);
+                            feedForwardLayer.setNIn(lastnOut);
+                            conf.inputPreProcessor(i + 1, new CnnToRnnPreProcessor(lastHeight, lastWidth, lastOutChannels));
+                            break;
+                        case BATCH_NORMALIZATION:
+                            throw new UnsupportedOperationException("BaseNormalization should not follow a LocalResponse layer.");
+                        case ACTIVATION_LAYER:
+                            feedForwardLayer = (FeedForwardLayer) outputLayer;
+                            storeNInAndNOut(outLayerName, lastnOut); // required to be before inputPreProcessor to update lastHeight and lastWidth
+                            feedForwardLayer.setNOut(lastnOut);
+                            useCNN = true;
+                            break;
+                    }
+                    break;
+                case RNN_OUTPUT_LAYER:
+                case OUTPUT_LAYER:
+                    throw new UnsupportedOperationException("OutputLayer should be the last layer");
             }
-
-            else if(i < numLayers - 1 && getLayer(i,conf) instanceof SubsamplingLayer) {
-                SubsamplingLayer subsamplingLayer = (SubsamplingLayer) getLayer(i,conf);
-                Layer next = getLayer(i + 1,conf);
-                //cnn -> feedforward
-                if(next instanceof DenseLayer || next instanceof OutputLayer) {
-                    //need to infer nins from first input size
-                    int[] outWidthAndHeight = getSubSamplingOutputSize(new int[]{lastHeight, lastWidth}, subsamplingLayer.getKernelSize(), subsamplingLayer.getStride());
-                    outSizesEachLayer.put(i,outWidthAndHeight);
-                    int outRows = outWidthAndHeight[0];
-                    int outCols = outWidthAndHeight[1];
-                    lastHeight =  outWidthAndHeight[0];
-                    lastWidth =  outWidthAndHeight[1];
-
-                    //set the feed forward wrt the out channels of the current convolution layer
-                    //set the rows and columns (height/width) wrt the kernel size of the current layer
-                    conf.inputPreProcessor(i + 1,new CnnToFeedForwardPreProcessor(
-                            outRows
-                            ,outCols,lastOutChannels));
-                    //set the number of inputs wrt the current convolution layer
-                    FeedForwardLayer o = (FeedForwardLayer) next;
-                    int nIn = outCols * outRows * lastOutChannels;
-                    o.setNIn(nIn);
-                    nInForLayer.put(i + 1,nIn);
-                    //setup the fourd connections
-                    setFourDtoTwoD(i, conf, o);
-                    alreadySet = true;
-
-                }
-                //cnn -> subsampling
-
-                //cnn -> cnn
-                else if(next instanceof ConvolutionLayer) {
-                    ConvolutionLayer nextConv = (ConvolutionLayer) next;
-                    //set next layer's convolution input channels
-                    //to be equal to this layer's out channels
-                    nextConv.setNIn(lastOutChannels);
-                }
-            }
-
-
-            else if(i < numLayers - 1 && (getLayer(i,conf) instanceof DenseLayer || getLayer(i,conf) instanceof OutputLayer)) {
-                FeedForwardLayer forwardLayer = (FeedForwardLayer) getLayer(i, conf);
-                if(getLayer(i + 1,conf) instanceof  ConvolutionLayer) {
-                    ConvolutionLayer convolutionLayer = (ConvolutionLayer) getLayer(i + 1,conf);
-                    throw new UnsupportedOperationException("2d to 4d needs to be implemented");
-                }
-                else if(getLayer(i + 1,conf) instanceof SubsamplingLayer) {
-                    SubsamplingLayer subsamplingLayer = (SubsamplingLayer) getLayer(i + 1,conf);
-                    throw new UnsupportedOperationException("2d to 4d needs to be implemented");
-
-                }
-                //feedforward to feedforward
-                else if(getLayer(i + 1,conf) instanceof OutputLayer || getLayer(i + 1,conf) instanceof DenseLayer) {
-                    FeedForwardLayer d = (FeedForwardLayer) getLayer(i + 1,conf);
-                    d.setNIn(forwardLayer.getNOut());
-                    nInForLayer.put(i + 1,forwardLayer.getNOut());
-                }
-
-                setFourDtoTwoD(i,conf,forwardLayer);
-            }
-
-
-            //cnn -> feed forward
-
-            //feed forward to cnn
-            //convolution to subsampling
-            //subsampling to cnn
-            //subsampling to feedforward
-            //feedforward to subsampling
-            //update the output size for a given activation
-            //this allows us to track outputs for automatic setting
-            //of certain values in the conv net
-            if(curr instanceof ConvolutionLayer && i < numLayers - 1 && !alreadySet) {
-                ConvolutionLayer convolutionLayer = (ConvolutionLayer) curr;
-                int[] outWidthAndHeight = getConvolutionOutputSize(new int[]{lastHeight, lastWidth}, convolutionLayer.getKernelSize(), convolutionLayer.getPadding(), convolutionLayer.getStride());
-                lastHeight =  outWidthAndHeight[0];
-                lastWidth =  outWidthAndHeight[1];
-                lastOutChannels = convolutionLayer.getNOut();
-                outSizesEachLayer.put(i,outWidthAndHeight);
-
-            }
-            //update the output size for a given
-            //activation
-            //this allows us to track outputs for automatic setting
-            //of certain values in teh conv net
-            else if(curr instanceof SubsamplingLayer && i < numLayers - 1 && !alreadySet) {
-                SubsamplingLayer subsamplingLayer = (SubsamplingLayer) curr;
-                int[] outWidthAndHeight = getSubSamplingOutputSize(new int[]{lastHeight, lastWidth}, subsamplingLayer.getKernelSize(), subsamplingLayer.getStride());
-                lastHeight =  outWidthAndHeight[0];
-                lastWidth =  outWidthAndHeight[1];
-                outSizesEachLayer.put(i,outWidthAndHeight);
-
-                //don't need channels here; its inferred from the last time
-                //in the for loop
-            }
-
-        }
-
-        if(getLayer(numLayers - 1,conf) instanceof OutputLayer || getLayer(numLayers - 1,conf) instanceof DenseLayer) {
-            FeedForwardLayer lastLayer = (FeedForwardLayer) getLayer(numLayers - 1,conf);
-            if(getLayer(numLayers - 2,conf) instanceof DenseLayer || getLayer(numLayers - 2,conf) instanceof OutputLayer) {
-                FeedForwardLayer feedForwardLayer = (FeedForwardLayer) getLayer(numLayers - 2,conf);
-                lastLayer.setNIn(feedForwardLayer.getNOut());
-                nInForLayer.put(numLayers - 1,feedForwardLayer.getNOut());
-            }
-            else if(getLayer(numLayers - 2,conf) instanceof SubsamplingLayer) {
-                lastLayer.setNIn(lastHeight * lastWidth * lastOutChannels);
-                nInForLayer.put(numLayers - 1,lastHeight * lastWidth * lastOutChannels);
-            }
-            else if(getLayer(numLayers - 2,conf) instanceof ConvolutionLayer) {
-                lastLayer.setNIn(lastHeight * lastWidth * lastOutChannels);
-                nInForLayer.put(numLayers - 1, lastHeight * lastWidth * lastOutChannels);
-
-            }
-        }
-        else if(getLayer(numLayers - 1,conf) instanceof ConvolutionLayer) {
-            throw new UnsupportedOperationException("Unsupported path: final convolution layer");
-        }
-        else if(getLayer(numLayers - 1,conf) instanceof SubsamplingLayer) {
-            throw new UnsupportedOperationException("Unsupported path: final subsampling layer");
-        }
-
-        if(conf instanceof NeuralNetConfiguration.ListBuilder) {
-            NeuralNetConfiguration.ListBuilder l = (NeuralNetConfiguration.ListBuilder) conf;
-            if(l.getLayerwise().get(0).getLayer() instanceof ConvolutionLayer || l.getLayerwise().get(0).getLayer() instanceof SubsamplingLayer) {
-                conf.inputPreProcessor(0,new FeedForwardToCnnPreProcessor(height,width,channels));
-            }
-
-        }
-        else {
-            if(conf.getConfs().get(0).getLayer() instanceof ConvolutionLayer || conf.getConfs().get(0).getLayer() instanceof SubsamplingLayer) {
-                conf.inputPreProcessor(0,new FeedForwardToCnnPreProcessor(height,width,channels));
-            }
-        }
-
-
-
-
+        } else
+            throw new UnsupportedOperationException("Unsupported path: final " + inputLayer.getClass().getSimpleName() + " layer");
     }
 
-    private int[] getSubSamplingOutputSize(int[] inputWidthAndHeight,int[] kernelWidthAndHeight,int[] stride) {
-        int[] ret = new int[inputWidthAndHeight.length];
+    // cnn -> batch -> cnn
+    // cnn -> batch -> dnn -> batch -> cnn
+    // cnn -> batch -> act -> cnn
+    // cnn-> batch -> act -> dnn
+    // cnn-> batch -> act -> rnn
+
+
+    // dnn-> batch -> act -> cnn
+    // dnn-> batch -> act -> dnn
+    // dnn-> batch -> act -> rnn
+
+    // rnn-> batch -> act -> cnn
+    // rnn-> batch -> act -> dnn
+    // rnn-> batch -> act -> rnn
+
+
+
+    private void getConvolutionOutputSize(int[] input, int[] kernel, int[] padding, int[] stride) {
+        int[] ret = new int[input.length];
+        KernelValidationUtil.validateShapes(input[0], input[1],
+                kernel[0], kernel[1], stride[0], stride[1],padding[0], padding[1]);
+
         for(int i = 0; i < ret.length; i++) {
-            if(kernelWidthAndHeight[i] == 1)
-                ret[i] = inputWidthAndHeight[i] / stride[i];
-            else {
-                ret[i] = (inputWidthAndHeight[i] - kernelWidthAndHeight[i]) / stride[i] + 1;
-            }
+            ret[i] = (input[i] - kernel[i] + (2 * padding[i])) / stride[i] + 1;
         }
-
-        return ret;
+        lastHeight = ret[0];
+        lastWidth = ret[1];
     }
 
-
-    private int[] getConvolutionOutputSize(int[] inputWidthAndHeight, int[] kernelWidthAndHeight, int[] padding, int[] stride) {
-        int[] ret = new int[inputWidthAndHeight.length];
-        for(int i = 0; i < ret.length; i++) {
-            ret[i] = (inputWidthAndHeight[i] - kernelWidthAndHeight[i] + (2 * padding[i])) / stride[i] + 1;
-        }
-        return ret;
-    }
-
-    public Layer getLayer(int i,MultiLayerConfiguration.Builder builder) {
+    public Layer getLayer(int i, MultiLayerConfiguration.Builder builder) {
         if(builder instanceof NeuralNetConfiguration.ListBuilder) {
             NeuralNetConfiguration.ListBuilder listBuilder = (NeuralNetConfiguration.ListBuilder) builder;
             if(listBuilder.getLayerwise().get(i) == null)
@@ -291,69 +435,6 @@ public class ConvolutionLayerSetup {
         }
 
         return builder.getConfs().get(i).getLayer();
-    }
-
-
-    private void setFourDtoTwoD(int i, MultiLayerConfiguration.Builder conf, FeedForwardLayer d) {
-        //only for output layer and dense layer
-        if(d instanceof ConvolutionLayer)
-            return;
-
-        Layer currFourdLayer = conf instanceof NeuralNetConfiguration.ListBuilder  ? ((NeuralNetConfiguration.ListBuilder) conf).getLayerwise().get(i).getLayer() : conf.getConfs().get(i).getLayer();
-        //2d -> 4d
-        if(currFourdLayer instanceof ConvolutionLayer || currFourdLayer instanceof SubsamplingLayer) {
-            if(currFourdLayer instanceof ConvolutionLayer) {
-                ConvolutionLayer convolutionLayer = (ConvolutionLayer) currFourdLayer;
-                int inputHeight = lastHeight;
-                int inputWidth = lastWidth;
-                //set the number of out such that the 2d output of
-                //this layer match the width and height of the kernel
-                /**
-                 * We need to either set the number of in channels in the convolution layer
-                 * to be equal to the outs of the dense/output layer
-                 * or we need to set the number of outs
-                 * equal to the kernel width and height.
-                 *
-                 * This allows the user flexibility in how they'd
-                 * like to set the values.
-                 *
-                 */
-                if(convolutionLayer.getKernelSize() != null) {
-                    d.setNOut(inputHeight * inputWidth * convolutionLayer.getNOut());
-                }
-                else
-                    throw new IllegalStateException("Unable to infer width and height without convolution layer kernel size");
-                //set the input pre processor automatically for reshaping
-                conf.inputPreProcessor(i + 1,new CnnToFeedForwardPreProcessor(inputHeight,inputWidth,lastOutChannels));
-
-            }
-            else if(currFourdLayer instanceof SubsamplingLayer) {
-                int inputHeight = lastHeight;
-                int inputWidth = lastWidth ;
-                //set the number of out such that the 2d output of
-                //this layer match the width and height of the kernel
-                /**
-                 * We need to either set the number of in channels in the convolution layer
-                 * to be equal to the outs of the dense/output layer
-                 * or we need to set the number of outs
-                 * equal to the kernel width and height.
-                 *
-                 * This allows the user flexibility in how they'd
-                 * like to set the values.
-                 *
-                 *
-                 * Note here that we only modify the output layer's
-                 * nouts when the next fully connected layer
-                 * isn't the final one.
-                 */
-
-                //set the input pre processor automatically for reshaping
-                conf.inputPreProcessor(i + 1,new CnnToFeedForwardPreProcessor(inputHeight,inputWidth,lastOutChannels));
-
-
-            }
-
-        }
     }
 
     public int getLastHeight() {
@@ -380,19 +461,19 @@ public class ConvolutionLayerSetup {
         this.lastOutChannels = lastOutChannels;
     }
 
-    public Map<Integer, int[]> getOutSizesEachLayer() {
-        return outSizesEachLayer;
+    public Map<String, int[]> getOutSizesEachLayer() {
+        return nOutsPerLayer;
     }
 
-    public void setOutSizesEachLayer(Map<Integer, int[]> outSizesEachLayer) {
-        this.outSizesEachLayer = outSizesEachLayer;
+    public void setOutSizesEachLayer(Map<String, int[]> outSizesEachLayer) {
+        this.nOutsPerLayer = outSizesEachLayer;
     }
 
-    public Map<Integer, Integer> getnInForLayer() {
-        return nInForLayer;
+    public Map<String, Integer> getnInForLayer() {
+        return nInsPerLayer;
     }
 
-    public void setnInForLayer(Map<Integer, Integer> nInForLayer) {
-        this.nInForLayer = nInForLayer;
+    public void setnInForLayer(Map<String, Integer> nInForLayer) {
+        this.nInsPerLayer = nInForLayer;
     }
 }

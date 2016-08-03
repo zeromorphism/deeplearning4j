@@ -25,12 +25,12 @@ import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.mllib.linalg.Matrix;
 import org.apache.spark.mllib.linalg.Vector;
 import org.apache.spark.mllib.regression.LabeledPoint;
-import org.canova.api.records.reader.RecordReader;
+import org.datavec.api.records.reader.RecordReader;
 import org.deeplearning4j.nn.api.Layer;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.conf.layers.FeedForwardLayer;
 import org.deeplearning4j.nn.layers.factory.LayerFactories;
-import org.deeplearning4j.spark.canova.RecordReaderFunction;
+import org.deeplearning4j.spark.datavec.RecordReaderFunction;
 import org.deeplearning4j.spark.impl.common.Add;
 import org.deeplearning4j.spark.util.MLLibUtil;
 import org.nd4j.linalg.api.ndarray.INDArray;
@@ -107,14 +107,15 @@ public class SparkDl4jLayer implements Serializable {
     public Layer fitDataSet(JavaRDD<DataSet> rdd) {
         int iterations = conf.getNumIterations();
         long count = rdd.count();
-        int batchSize = conf.getBatchSize();
-        if(batchSize == 0)
-            batchSize = 10;
+
 
         log.info("Running distributed training averaging each iteration " + averageEachIteration + " and " + rdd.partitions().size() + " partitions");
         if(!averageEachIteration) {
-            Layer layer = LayerFactories.getFactory(conf.getLayer()).create(conf);
-            final INDArray params = layer.params();
+            int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+            final INDArray params = Nd4j.create(1, numParams);
+            Layer layer = LayerFactories.getFactory(conf.getLayer()).create(conf,null,0,params, true);
+            layer.setBackpropGradientsViewArray(Nd4j.create(1,numParams));
+//            final INDArray params = layer.params();
             this.params = sc.broadcast(params);
             log.info("Broadcasting initial parameters of length " + params.length());
             int paramsLength = layer.numParams();
@@ -129,8 +130,11 @@ public class SparkDl4jLayer implements Serializable {
         }
         else {
             conf.setNumIterations(1);
-            Layer layer = LayerFactories.getFactory(conf.getLayer()).create(conf);
-            final INDArray params = layer.params();
+            int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+            final INDArray params = Nd4j.create(1, numParams);
+            Layer layer = LayerFactories.getFactory(conf.getLayer()).create(conf, null, 0, params, true);
+            layer.setBackpropGradientsViewArray(Nd4j.create(1,numParams));
+//            final INDArray params = layer.params();
             this.params = sc.broadcast(params);
 
             for(int i = 0; i < iterations; i++) {
@@ -144,7 +148,7 @@ public class SparkDl4jLayer implements Serializable {
                 newParams.divi(rdd.partitions().size());
             }
 
-            layer.setParams(this.params.value());
+            layer.setParams(this.params.value().dup());
             this.layer = layer;
 
 

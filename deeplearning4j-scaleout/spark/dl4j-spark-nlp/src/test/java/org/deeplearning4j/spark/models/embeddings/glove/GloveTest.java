@@ -18,25 +18,28 @@
 
 package org.deeplearning4j.spark.models.embeddings.glove;
 
-import static org.junit.Assert.assertTrue;
-
-import java.util.Collection;
-
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.Function;
+import org.datavec.api.util.ClassPathResource;
 import org.deeplearning4j.berkeley.Pair;
 import org.deeplearning4j.models.embeddings.inmemory.InMemoryLookupTable;
 import org.deeplearning4j.models.embeddings.loader.WordVectorSerializer;
 import org.deeplearning4j.models.embeddings.wordvectors.WordVectors;
 import org.deeplearning4j.models.glove.GloveWeightLookupTable;
+import org.deeplearning4j.models.word2vec.VocabWord;
 import org.deeplearning4j.models.word2vec.wordstore.VocabCache;
 import org.deeplearning4j.spark.text.BaseSparkTest;
+import org.junit.Ignore;
 import org.junit.Test;
-import org.springframework.core.io.ClassPathResource;
+
+import java.util.Collection;
+
+import static org.junit.Assert.assertTrue;
 
 /**
  * Created by agibsonccc on 1/31/15.
  */
+@Ignore
 public class GloveTest extends BaseSparkTest {
 
     @Test
@@ -50,8 +53,8 @@ public class GloveTest extends BaseSparkTest {
         }).cache();
 
 
-        Pair<VocabCache,GloveWeightLookupTable> table = glove.train(corpus);
-        WordVectors vectors = WordVectorSerializer.fromPair(new Pair<>((InMemoryLookupTable) table.getSecond(), table.getFirst()));
+        Pair<VocabCache<VocabWord>,GloveWeightLookupTable> table = glove.train(corpus);
+        WordVectors vectors = WordVectorSerializer.fromPair(new Pair<>((InMemoryLookupTable) table.getSecond(), (VocabCache) table.getFirst()));
         Collection<String> words = vectors.wordsNearest("day", 20);
         assertTrue(words.contains("week"));
     }

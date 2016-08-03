@@ -19,8 +19,6 @@
 package org.deeplearning4j.plot;
 
 
-import static org.nd4j.linalg.ops.transforms.Transforms.*;
-
 import com.google.common.util.concurrent.AtomicDouble;
 import org.apache.commons.math3.util.FastMath;
 import org.deeplearning4j.berkeley.Pair;
@@ -39,7 +37,6 @@ import org.nd4j.linalg.indexing.conditions.Conditions;
 import org.nd4j.linalg.indexing.functions.Value;
 import org.nd4j.linalg.learning.AdaGrad;
 
-
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
@@ -48,9 +45,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.nd4j.linalg.factory.Nd4j.ones;
-import static org.nd4j.linalg.factory.Nd4j.randn;
-import static org.nd4j.linalg.factory.Nd4j.zeros;
+import static org.nd4j.linalg.factory.Nd4j.*;
+import static org.nd4j.linalg.ops.transforms.Transforms.pow;
+import static org.nd4j.linalg.ops.transforms.Transforms.sign;
 
 
 /**
@@ -71,6 +68,8 @@ public class BarnesHutTsne extends Tsne implements Model {
     private int numDimensions = 0;
     public final static String Y_GRAD = "yIncs";
     private SpTree tree;
+    private INDArray gains;
+    private INDArray yIncs;
 
     public BarnesHutTsne(INDArray x,
                          INDArray y,
@@ -84,7 +83,7 @@ public class BarnesHutTsne extends Tsne implements Model {
                          double finalMomentum,
                          double learningRate) {
 
-        this.y = y;
+        this.Y = y;
         this. x = x;
         this.numDimensions = numDimensions;
         this.perplexity = perplexity;
@@ -117,9 +116,24 @@ public class BarnesHutTsne extends Tsne implements Model {
                          boolean useAdaGrad,
                          double perplexity,
                          double minGain) {
-        super(maxIter, realMin,initialMomentum,finalMomentum,momentum,switchMomentumIteration,normalize,
-                usePca,stopLyingIteration,tolerance,learningRate,useAdaGrad,perplexity,minGain);
-        this.y = y;
+        super();
+        // maxIter, realMin,initialMomentum,finalMomentum,momentum,switchMomentumIteration,normalize, usePca,stopLyingIteration,tolerance,learningRate,useAdaGrad,perplexity,minGain
+        this.maxIter = maxIter;
+        this.realMin = realMin;
+        this.initialMomentum = initialMomentum;
+        this.finalMomentum = finalMomentum;
+        this.momentum = momentum;
+        this.normalize = normalize;
+        this.useAdaGrad = useAdaGrad;
+        this.usePca = usePca;
+        this.stopLyingIteration = stopLyingIteration;
+        this.learningRate = learningRate;
+        this.switchMomentumIteration = switchMomentumIteration;
+        this.tolerance = tolerance;
+        this.perplexity = perplexity;
+        this.minGain = minGain;
+
+        this.Y = y;
         this.x = x;
         this.numDimensions = numDimensions;
         this.simiarlityFunction = simiarlityFunction;
@@ -159,7 +173,6 @@ public class BarnesHutTsne extends Tsne implements Model {
      * @param u the perplexity of the model
      * @return the probabilities of co-occurrence
      */
-    @Override
     public INDArray computeGaussianPerplexity(final INDArray d,  double u) {
         N = d.rows();
 
@@ -168,9 +181,9 @@ public class BarnesHutTsne extends Tsne implements Model {
             throw new IllegalStateException("Illegal k value " + k + "greater than " + u);
 
 
-        rows = zeros(N + 1);
-        cols = zeros(N * k);
-        vals = zeros(N * k);
+        rows = zeros(1,N + 1);
+        cols = zeros(1,N * k);
+        vals = zeros(1,N * k);
 
         for(int n = 0; n < N; n++)
             rows.putScalar(n + 1,rows.getDouble(n) + k);
@@ -181,10 +194,10 @@ public class BarnesHutTsne extends Tsne implements Model {
         final double logU =  FastMath.log(u);
         VPTree tree = new VPTree(d,simiarlityFunction,invert);
 
-        log.info("Calculating probabilities of data similarities...");
+        logger.info("Calculating probabilities of data similarities...");
         for(int i = 0; i < N; i++) {
             if(i % 500 == 0)
-                log.info("Handled " + i + " records");
+                logger.info("Handled " + i + " records");
 
             double betaMin = -Double.MAX_VALUE;
             double betaMax = Double.MAX_VALUE;
@@ -228,7 +241,7 @@ public class BarnesHutTsne extends Tsne implements Model {
 
 
             currP.divi(currP.sum(Integer.MAX_VALUE));
-            INDArray indices = Nd4j.create(k + 1);
+            INDArray indices = Nd4j.create(1,k + 1);
             for(int j = 0; j < indices.length(); j++) {
                 if(j >= results.size())
                     break;
@@ -291,7 +304,6 @@ public class BarnesHutTsne extends Tsne implements Model {
     public void clear(){}
 
     /* compute the gradient given the current solution, the probabilities and the constant */
-    @Override
     protected Pair<Double,INDArray> gradient(INDArray p) {
         throw new UnsupportedOperationException();
     }
@@ -420,12 +432,12 @@ public class BarnesHutTsne extends Tsne implements Model {
     public void fit() {
         boolean exact = theta == 0.0;
         if(exact)
-            y = super.calculate(x,numDimensions,perplexity);
+            Y = super.calculate(x,numDimensions,perplexity);
 
         else {
             //output
-            if(y == null)
-                y = randn(x.rows(),numDimensions,Nd4j.getRandom()).muli(1e-3f);
+            if(Y == null)
+                Y = randn(x.rows(),numDimensions,Nd4j.getRandom()).muli(1e-3f);
 
 
             computeGaussianPerplexity(x,perplexity);
@@ -443,11 +455,8 @@ public class BarnesHutTsne extends Tsne implements Model {
 
                 if(iterationListener != null)
                     iterationListener.iterationDone(this,i);
-                log.info("Error at iteration " + i + " is " + score());
-
-
+                logger.info("Error at iteration " + i + " is " + score());
             }
-
         }
     }
 
@@ -458,7 +467,6 @@ public class BarnesHutTsne extends Tsne implements Model {
      *          are near each other
      * @param i the iteration (primarily for debugging purposes)
      */
-    @Override
     public void step(INDArray p, int i) {
         update(gradient().getGradientFor(Y_GRAD), Y_GRAD);
     }
@@ -491,7 +499,7 @@ public class BarnesHutTsne extends Tsne implements Model {
             gradChange.muli(learningRate);
 
         yIncs.muli(momentum).subi(gradChange);
-        y.addi(yIncs);
+        Y.addi(yIncs);
 
     }
 
@@ -510,14 +518,14 @@ public class BarnesHutTsne extends Tsne implements Model {
 
         BufferedWriter write = new BufferedWriter(new FileWriter(new File(path)));
 
-        for(int i = 0; i < y.rows(); i++) {
+        for(int i = 0; i < Y.rows(); i++) {
             if(i >= labels.size())
                 break;
             String word = labels.get(i);
             if(word == null)
                 continue;
-            StringBuffer sb = new StringBuffer();
-            INDArray wordVector = y.getRow(i);
+            StringBuilder sb = new StringBuilder();
+            INDArray wordVector = Y.getRow(i);
             for(int j = 0; j < wordVector.length(); j++) {
                 sb.append(wordVector.getDouble(j));
                 if(j < wordVector.length() - 1)
@@ -548,7 +556,7 @@ public class BarnesHutTsne extends Tsne implements Model {
 
         // Loop over all edges to compute t-SNE error
         double C = .0;
-        INDArray linear = y;
+        INDArray linear = Y;
         for(int n = 0; n < N; n++) {
             int begin = rows.getInt(n);
             int end = rows.getInt(n + 1);
@@ -588,8 +596,28 @@ public class BarnesHutTsne extends Tsne implements Model {
     }
 
     @Override
+    public int numParams(boolean backwards) {
+        return 0;
+    }
+
+    @Override
     public void setParams(INDArray params) {
 
+    }
+
+    @Override
+    public void setParamsViewArray(INDArray params) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void setBackpropGradientsViewArray(INDArray gradients) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void applyLearningRateScoreDecay() {
+        throw new UnsupportedOperationException("Not yet implemented");
     }
 
     @Override
@@ -612,16 +640,16 @@ public class BarnesHutTsne extends Tsne implements Model {
     @Override
     public Gradient gradient() {
         if(yIncs == null)
-            yIncs =  zeros(y.shape());
+            yIncs =  zeros(Y.shape());
         if(gains == null)
-            gains = ones(y.shape());
+            gains = ones(Y.shape());
 
         AtomicDouble sumQ = new AtomicDouble(0);
         /* Calculate gradient based on barnes hut approximation with positive and negative forces */
-        INDArray posF = Nd4j.create(y.shape());
-        INDArray negF = Nd4j.create(y.shape());
+        INDArray posF = Nd4j.create(Y.shape());
+        INDArray negF = Nd4j.create(Y.shape());
         if(tree == null)
-            tree = new SpTree(y);
+            tree = new SpTree(Y);
         tree.computeEdgeForces(rows,cols,vals,N,posF);
 
         for(int n = 0; n < N; n++)
@@ -768,5 +796,8 @@ public class BarnesHutTsne extends Tsne implements Model {
                     maxIter,realMin,initialMomentum,finalMomentum,momentum,switchMomentumIteration,normalize,
                     usePca,stopLyingIteration,tolerance,learningRate,useAdaGrad,perplexity,minGain);
         }
+
+
     }
+
 }

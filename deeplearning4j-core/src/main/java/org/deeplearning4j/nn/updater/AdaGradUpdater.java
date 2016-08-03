@@ -1,8 +1,6 @@
 package org.deeplearning4j.nn.updater;
 
 import org.deeplearning4j.nn.api.Layer;
-import org.deeplearning4j.nn.gradient.Gradient;
-import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.learning.AdaGrad;
 import org.nd4j.linalg.learning.GradientUpdater;
 
@@ -22,10 +20,10 @@ public class AdaGradUpdater extends BaseUpdater {
     }
 
     @Override
-    public GradientUpdater init(String variable, INDArray gradient, Layer layer) {
+    public GradientUpdater init(String variable, Layer layer) {
         AdaGrad adaGrad = (AdaGrad) updaterForVariable.get(variable);
         if(adaGrad == null) {
-            adaGrad = new AdaGrad(layer.conf().getLayer().getLearningRate());
+            adaGrad = new AdaGrad(layer.conf().getLearningRateByParam(variable));
             updaterForVariable.put(variable, adaGrad);
         }
 

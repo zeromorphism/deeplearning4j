@@ -24,11 +24,12 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
 import org.deeplearning4j.berkeley.Counter;
 import org.deeplearning4j.berkeley.Pair;
+import org.deeplearning4j.models.embeddings.loader.VectorsConfiguration;
+import org.deeplearning4j.models.word2vec.Huffman;
 import org.deeplearning4j.models.word2vec.VocabWord;
 import org.deeplearning4j.models.word2vec.wordstore.VocabCache;
-import org.deeplearning4j.models.word2vec.wordstore.inmemory.InMemoryLookupCache;
+import org.deeplearning4j.models.word2vec.wordstore.inmemory.AbstractCache;
 import org.deeplearning4j.spark.text.accumulators.WordFreqAccumulator;
-import org.deeplearning4j.text.stopwords.StopWords;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -56,11 +57,13 @@ public class TextPipeline {
     private Broadcast<List<String>> stopWordBroadCast;
     // Return values
     private JavaRDD<Pair<List<String>, AtomicLong>> sentenceWordsCountRDD;
-    private VocabCache vocabCache = new InMemoryLookupCache();
-    private Broadcast<VocabCache> vocabCacheBroadcast;
+    private VocabCache<VocabWord> vocabCache = new AbstractCache<>();
+    private Broadcast<VocabCache<VocabWord>> vocabCacheBroadcast;
     private JavaRDD<List<VocabWord>> vocabWordListRDD;
     private JavaRDD<AtomicLong> sentenceCountRDD;
     private long totalWordCount;
+    private boolean useUnk;
+    private VectorsConfiguration configuration;
 
     // Empty Constructor
     public TextPipeline() {}
@@ -82,10 +85,12 @@ public class TextPipeline {
         this.nGrams = (int) tokenizerVarMap.get("nGrams");
         this.tokenizer = (String) tokenizerVarMap.get("tokenizer");
         this.tokenizerPreprocessor = (String) tokenizerVarMap.get("tokenPreprocessor");
+        this.useUnk = (boolean) tokenizerVarMap.get("useUnk");
+        this.configuration = (VectorsConfiguration) tokenizerVarMap.get("vectorsConfiguration");
         // Remove Stop words
-        if ((boolean) tokenizerVarMap.get("removeStop")) {
-            stopWords = StopWords.getStopWords();
-        }
+       // if ((boolean) tokenizerVarMap.get("removeStop")) {
+            stopWords = (List<String>) tokenizerVarMap.get("stopWords");
+    //    }
     }
 
     private void setup() {
@@ -114,7 +119,7 @@ public class TextPipeline {
     }
 
     private String filterMinWord(String stringToken, double tokenCount) {
-        return (tokenCount < numWords) ? org.deeplearning4j.models.word2vec.Word2Vec.UNK : stringToken;
+        return (tokenCount < numWords) ? configuration.getUNK() : stringToken;
     }
 
     private void addTokenToVocabCache(String stringToken, Double tokenCount) {
@@ -122,7 +127,7 @@ public class TextPipeline {
         VocabWord actualToken;
         if (vocabCache.hasToken(stringToken)) {
             actualToken = vocabCache.tokenFor(stringToken);
-            actualToken.increment(tokenCount.intValue());
+            actualToken.increaseElementFrequency(tokenCount.intValue());
         } else {
             actualToken = new VocabWord(tokenCount, stringToken);
         }
@@ -131,8 +136,9 @@ public class TextPipeline {
         // Put vocabWord into vocabs in InMemoryVocabCache
         boolean vocabContainsWord = vocabCache.containsWord(stringToken);
         if (!vocabContainsWord) {
-            vocabCache.addToken(actualToken);
             int idx = vocabCache.numWords();
+
+            vocabCache.addToken(actualToken);
             actualToken.setIndex(idx);
             vocabCache.putVocabWord(stringToken);
         }
@@ -140,7 +146,7 @@ public class TextPipeline {
 
     public void filterMinWordAddVocab(Counter<String> wordFreq) {
 
-        if (wordFreq.size() == 0) {
+        if (wordFreq.isEmpty()) {
             throw new IllegalStateException("IllegalStateException: wordFreqCounter has nothing. Check accumulator updating");
         }
 
@@ -150,9 +156,9 @@ public class TextPipeline {
 
             // Turn words below min count to UNK
             stringToken = filterMinWord(stringToken, tokenCount);
-
-            // Turn tokens to vocab and add to vocab cache
-            addTokenToVocabCache(stringToken, tokenCount);
+            if (!useUnk && stringToken.equals("UNK")) {
+                // Turn tokens to vocab and add to vocab cache
+            } else addTokenToVocabCache(stringToken, tokenCount);
         }
     }
 
@@ -169,6 +175,11 @@ public class TextPipeline {
 
         // Filter out low count words and add to vocab cache object and feed into LookupCache
         filterMinWordAddVocab(wordFreqCounter);
+
+        // huffman tree should be built BEFORE vocab broadcast
+        Huffman huffman = new Huffman(vocabCache.vocabWords());
+        huffman.build();
+        huffman.applyIndexes(vocabCache);
 
         // At this point the vocab cache is built. Broadcast vocab cache
         vocabCacheBroadcast = sc.broadcast(vocabCache);
@@ -201,7 +212,7 @@ public class TextPipeline {
         }
     }
 
-    public Broadcast<VocabCache> getBroadCastVocabCache() throws IllegalStateException {
+    public Broadcast<VocabCache<VocabWord>> getBroadCastVocabCache() throws IllegalStateException {
         if (vocabCache.numWords() > 0) {
             return vocabCacheBroadcast;
         } else {
@@ -209,8 +220,8 @@ public class TextPipeline {
         }
     }
 
-    public VocabCache getVocabCache() throws IllegalStateException {
-        if (vocabCache.numWords() > 0) {
+    public VocabCache<VocabWord> getVocabCache() throws IllegalStateException {
+        if (vocabCache != null && vocabCache.numWords() > 0) {
             return vocabCache;
         } else {
             throw new IllegalStateException("IllegalStateException: VocabCache not set at TextPipline.");

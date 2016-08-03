@@ -20,11 +20,11 @@ package org.deeplearning4j.nn.conf.preprocessor;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import lombok.*;
-import org.deeplearning4j.berkeley.Pair;
-import org.deeplearning4j.nn.api.Layer;
+import lombok.AccessLevel;
+import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
 import org.deeplearning4j.nn.conf.InputPreProcessor;
-import org.deeplearning4j.nn.gradient.Gradient;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.api.shape.Shape;
 import org.nd4j.linalg.util.ArrayUtil;
@@ -77,35 +77,31 @@ public class FeedForwardToCnnPreProcessor implements InputPreProcessor {
     }
 
     @Override
-    public INDArray preProcess(INDArray input,Layer layer) {
+    public INDArray preProcess(INDArray input, int miniBatchSize) {
+        if(input.ordering() != 'c' || !Shape.strideDescendingCAscendingF(input)) input = input.dup('c');
+
         this.shape = input.shape();
         if(input.shape().length == 4)
             return input;
         if(input.columns() != inputWidth * inputHeight * numChannels)
             throw new IllegalArgumentException("Invalid input: expect output columns must be equal to rows " + inputHeight
-                    + " x columns " + inputWidth  + " but was instead " + Arrays.toString(input.shape()));
-        if(input.ordering() == 'f') input = Shape.toOffsetZeroCopy(input,'c');
-        return input.reshape(input.size(0),numChannels,inputHeight,inputWidth);
+                    + " x columns " + inputWidth + " x channels " + numChannels + " but was instead " + Arrays.toString(input.shape()));
+
+        return input.reshape('c',input.size(0),numChannels,inputHeight,inputWidth);
     }
 
     @Override
     // return 4 dimensions
-    public INDArray backprop(INDArray output,Layer layer){
-        if(shape == null || ArrayUtil.prod(shape) != output.length()) {
-            int[] otherOutputs = null;
-            if(output.shape().length == 2) {
-                return output;
-            } else if(output.shape().length == 4) {
-                otherOutputs = new int[3];
-            }
-            else if(output.shape().length == 3) {
-                otherOutputs = new int[2];
-            }
-            System.arraycopy(output.shape(), 1, otherOutputs, 0, otherOutputs.length);
-            shape = new int[] {output.shape()[0], ArrayUtil.prod(otherOutputs)};
+    public INDArray backprop(INDArray epsilons, int miniBatchSize){
+        if(epsilons.ordering() != 'c' || !Shape.strideDescendingCAscendingF(epsilons)) epsilons = epsilons.dup('c');
+
+        if(shape == null || ArrayUtil.prod(shape) != epsilons.length()) {
+            if(epsilons.rank() == 2) return epsilons;   //should never happen
+
+            return epsilons.reshape('c',epsilons.size(0), numChannels, inputHeight, inputWidth);
         }
-        if(output.ordering() == 'f') output = Shape.toOffsetZeroCopy(output,'c');
-        return output.reshape(shape);
+
+        return epsilons.reshape('c',shape);
     }
 
 

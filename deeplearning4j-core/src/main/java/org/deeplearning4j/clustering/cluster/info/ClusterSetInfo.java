@@ -18,17 +18,16 @@
 
 package org.deeplearning4j.clustering.cluster.info;
 
+import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.Table;
+import org.deeplearning4j.clustering.cluster.Cluster;
+import org.deeplearning4j.clustering.cluster.ClusterSet;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import org.deeplearning4j.clustering.cluster.Cluster;
-import org.deeplearning4j.clustering.cluster.ClusterSet;
-
-import com.google.common.collect.HashBasedTable;
-import com.google.common.collect.Table;
 
 public class ClusterSetInfo {
 
@@ -73,7 +72,7 @@ public class ClusterSetInfo {
 	}
 
 	public double getAveragePointDistanceFromClusterCenter() {
-		if (clustersInfos == null || clustersInfos.size() == 0)
+		if (clustersInfos == null || clustersInfos.isEmpty())
 			return 0;
 
 		double average = 0;
@@ -83,7 +82,7 @@ public class ClusterSetInfo {
 	}
 	
 	public double getPointDistanceFromClusterVariance() {
-		if (clustersInfos == null || clustersInfos.size() == 0)
+		if (clustersInfos == null || clustersInfos.isEmpty())
 			return 0;
 
 		double average = 0;

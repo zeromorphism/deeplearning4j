@@ -18,22 +18,21 @@
 
 package org.deeplearning4j.optimize;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-
 import org.deeplearning4j.nn.api.Model;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.optimize.api.ConvexOptimizer;
 import org.deeplearning4j.optimize.api.IterationListener;
 import org.deeplearning4j.optimize.api.StepFunction;
 import org.deeplearning4j.optimize.solvers.ConjugateGradient;
+import org.deeplearning4j.optimize.solvers.LBFGS;
 import org.deeplearning4j.optimize.solvers.LineGradientDescent;
 import org.deeplearning4j.optimize.solvers.StochasticGradientDescent;
-import org.deeplearning4j.optimize.solvers.LBFGS;
-import org.deeplearning4j.optimize.solvers.StochasticHessianFree;
 import org.deeplearning4j.optimize.stepfunctions.StepFunctions;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 
 /**
  * Generic purpose solver
@@ -54,21 +53,29 @@ public class Solver {
     }
 
     public ConvexOptimizer getOptimizer() {
+        if(optimizer != null) return optimizer;
         switch(conf.getOptimizationAlgo()) {
             case LBFGS:
-                return new LBFGS(conf,stepFunction,listeners,model);
+                optimizer = new LBFGS(conf,stepFunction,listeners,model);
+                break;
             case LINE_GRADIENT_DESCENT:
-                return new LineGradientDescent(conf,stepFunction,listeners,model);
-            case HESSIAN_FREE:
-                return new StochasticHessianFree(conf,stepFunction,listeners,model);
+                optimizer = new LineGradientDescent(conf,stepFunction,listeners,model);
+                break;
             case CONJUGATE_GRADIENT:
-                return new ConjugateGradient(conf,stepFunction,listeners,model);
+                optimizer = new ConjugateGradient(conf,stepFunction,listeners,model);
+                break;
             case STOCHASTIC_GRADIENT_DESCENT:
-                return new StochasticGradientDescent(conf,stepFunction,listeners,model);
+                optimizer = new StochasticGradientDescent(conf,stepFunction,listeners,model);
+                break;
             default:
                 throw new IllegalStateException("No optimizer found");
         }
+        return optimizer;
+    }
 
+    public void setListeners(Collection<IterationListener> listeners){
+        this.listeners = listeners;
+        if(optimizer != null ) optimizer.setListeners(listeners);
     }
 
     public static class Builder {

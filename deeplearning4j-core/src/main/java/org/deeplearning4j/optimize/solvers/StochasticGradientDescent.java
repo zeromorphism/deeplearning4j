@@ -19,7 +19,6 @@
 package org.deeplearning4j.optimize.solvers;
 
 import org.deeplearning4j.berkeley.Pair;
-import org.deeplearning4j.nn.api.Layer;
 import org.deeplearning4j.nn.api.Model;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.gradient.Gradient;
@@ -29,7 +28,6 @@ import org.deeplearning4j.optimize.api.TerminationCondition;
 import org.nd4j.linalg.api.ndarray.INDArray;
 
 import java.util.Collection;
-import java.util.Map;
 
 /**
  * Stochastic Gradient Descent
@@ -58,10 +56,17 @@ public class StochasticGradientDescent extends BaseOptimizer {
 
             INDArray params = model.params();
             stepFunction.step(params,gradient.gradient());
-            model.setParams(params);    //params() may not be in-place
+            //Note: model.params() is always in-place for MultiLayerNetwork and ComputationGraph, hence no setParams is necessary there
+            //However: for pretrain layers, params are NOT a view. Thus a setParams call is necessary
+            //But setParams should be a no-op for MLN and CG
+            model.setParams(params);
 
             for(IterationListener listener : iterationListeners)
                 listener.iterationDone(model, i);
+
+            checkTerminalConditions(pair.getFirst().gradient(), oldScore, score, i);
+
+            iteration++;
         }
         return true;
     }

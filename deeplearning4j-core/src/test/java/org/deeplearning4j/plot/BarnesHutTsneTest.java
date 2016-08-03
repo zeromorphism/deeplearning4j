@@ -20,16 +20,16 @@ package org.deeplearning4j.plot;
 
 import org.apache.commons.io.IOUtils;
 import org.junit.Test;
-import static org.junit.Assert.*;
 import org.nd4j.linalg.api.buffer.DataBuffer;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.indexing.NDArrayIndex;
-import org.springframework.core.io.ClassPathResource;
-
+import org.nd4j.linalg.io.ClassPathResource;
 
 import java.io.File;
 import java.util.List;
+
+import static org.junit.Assert.assertEquals;
 
 /**
  * Created by agibsonccc on 10/1/14.
@@ -41,12 +41,12 @@ public class BarnesHutTsneTest {
         Nd4j.ENFORCE_NUMERICAL_STABILITY = true;
         Nd4j.factory().setDType(DataBuffer.Type.DOUBLE);
         Nd4j.getRandom().setSeed(123);
-        BarnesHutTsne b = new BarnesHutTsne.Builder().stopLyingIteration(250)
+        BarnesHutTsne b = new BarnesHutTsne.Builder().stopLyingIteration(10).setMaxIter(10)
                 .theta(0.5).learningRate(500).useAdaGrad(false)
                 .build();
 
         ClassPathResource resource = new ClassPathResource("/mnist2500_X.txt");
-        File f = resource.getFile();
+        File f = resource.getTempFileFromArchive();
         INDArray data = Nd4j.readNumpy(f.getAbsolutePath(),"   ").get(NDArrayIndex.interval(0,100),NDArrayIndex.interval(0,784));
 
 
@@ -60,7 +60,7 @@ public class BarnesHutTsneTest {
     public void testBuilderFields() throws Exception {
         final double theta = 0;
         final boolean invert = false;
-        final String similarityFunctions = "eucidean";
+        final String similarityFunctions = "euclidean";
         final int maxIter = 1;
         final double realMin = 1.0;
         final double initialMomentum = 2.0;

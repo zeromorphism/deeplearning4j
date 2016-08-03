@@ -18,18 +18,22 @@
 
 package org.deeplearning4j.datasets.mnist.draw;
 
-import java.io.FileInputStream;
-import java.io.ObjectInputStream;
-
 import org.deeplearning4j.datasets.iterator.impl.MnistDataSetIterator;
+import org.deeplearning4j.nn.layers.BasePretrainNetwork;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.dataset.DataSet;
 import org.nd4j.linalg.factory.Nd4j;
-import org.deeplearning4j.nn.layers.BasePretrainNetwork;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
 
 
 
 public class LoadAndDraw {
+
+	private LoadAndDraw() {
+	}
 
 	/**
 	 * @param args
@@ -40,10 +44,14 @@ public class LoadAndDraw {
 		ObjectInputStream ois = new ObjectInputStream(new FileInputStream(args[0]));
 		
 		BasePretrainNetwork network = (BasePretrainNetwork) ois.readObject();
-		
-		
+		try {
+			ois.close();
+		} catch (IOException e) {
+		}
+
 		DataSet test = null;
 		while(iter.hasNext()) {
+			test = iter.next();
 			INDArray reconstructed = network.activate(test.getFeatureMatrix());
 			for(int i = 0; i < test.numExamples(); i++) {
 				INDArray draw1 = test.get(i).getFeatureMatrix().mul(255);

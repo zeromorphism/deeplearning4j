@@ -18,10 +18,10 @@
 
 package org.deeplearning4j.text.tokenization.tokenizerfactory;
 
-import java.io.InputStream;
-
 import org.deeplearning4j.text.tokenization.tokenizer.TokenPreProcess;
 import org.deeplearning4j.text.tokenization.tokenizer.Tokenizer;
+
+import java.io.InputStream;
 
 /**
  * Generates a tokenizer for a given string
@@ -50,7 +50,11 @@ public interface TokenizerFactory {
      * @param preProcessor the token pre processor to use
      */
 	void setTokenPreProcessor(TokenPreProcess preProcessor);
-	
-	
-	
+
+	/**
+	 * Returns TokenPreProcessor set for this TokenizerFactory instance
+	 *
+	 * @return TokenPreProcessor instance, or null if no preprocessor was defined
+     */
+	TokenPreProcess getTokenPreProcessor();
 }

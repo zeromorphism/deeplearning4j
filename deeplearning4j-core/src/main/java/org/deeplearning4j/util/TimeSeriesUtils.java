@@ -30,6 +30,9 @@ import org.nd4j.linalg.indexing.NDArrayIndex;
 public class TimeSeriesUtils {
 
 
+    private TimeSeriesUtils() {
+    }
+
     /**
      * Calculate a moving average given the length
      * @param toAvg the array to average
@@ -43,6 +46,19 @@ public class TimeSeriesUtils {
         INDArrayIndex[] nMinusOne = new INDArrayIndex[]{NDArrayIndex.interval(n - 1,toAvg.columns())};
         ret.put(ends,ret.get(ends).sub(ret.get(begins)));
         return ret.get(nMinusOne).divi(n);
+    }
+
+    /**
+     * Reshape time series mask arrays. This should match the assumptions (f order, etc) in RnnOutputLayer
+     * @param timeSeriesMask    Mask array to reshape to a column vector
+     * @return                  Mask array as a column vector
+     */
+    public static INDArray reshapeTimeSeriesMaskToVector(INDArray timeSeriesMask){
+        if(timeSeriesMask.rank() != 2) throw new IllegalArgumentException("Cannot reshape mask: rank is not 2");
+
+        if(timeSeriesMask.ordering() != 'f') timeSeriesMask = timeSeriesMask.dup('f');
+
+        return timeSeriesMask.reshape('f',new int[]{timeSeriesMask.length(),1});
     }
 
 }

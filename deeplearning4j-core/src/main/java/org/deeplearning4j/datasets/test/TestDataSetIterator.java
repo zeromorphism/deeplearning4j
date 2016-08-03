@@ -18,9 +18,12 @@
 
 package org.deeplearning4j.datasets.test;
 
-import org.deeplearning4j.datasets.iterator.DataSetIterator;
-import org.deeplearning4j.datasets.iterator.DataSetPreProcessor;
+import lombok.Getter;
 import org.nd4j.linalg.dataset.DataSet;
+import org.nd4j.linalg.dataset.api.DataSetPreProcessor;
+import org.nd4j.linalg.dataset.api.iterator.DataSetIterator;
+
+import java.util.List;
 
 /**
  * Track number of times the dataset iterator has been called
@@ -34,7 +37,7 @@ public class TestDataSetIterator implements DataSetIterator {
 	private static final long serialVersionUID = -3042802726018263331L;
 	private DataSetIterator wrapped;
 	private int numDataSets = 0;
-    private DataSetPreProcessor preProcessor;
+    @Getter private DataSetPreProcessor preProcessor;
 	
 	
 	public TestDataSetIterator(DataSetIterator wrapped) {
@@ -77,6 +80,11 @@ public class TestDataSetIterator implements DataSetIterator {
 	}
 
 	@Override
+	public boolean resetSupported(){
+		return wrapped.resetSupported();
+	}
+
+	@Override
 	public void reset() {
 		wrapped.reset();
 	}
@@ -101,9 +109,13 @@ public class TestDataSetIterator implements DataSetIterator {
         this.preProcessor = (DataSetPreProcessor) preProcessor;
     }
 
+	@Override
+	public List<String> getLabels() {
+		return null;
+	}
 
 
-    public synchronized int getNumDataSets() {
+	public synchronized int getNumDataSets() {
 		return numDataSets;
 	}
 

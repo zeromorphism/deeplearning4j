@@ -20,11 +20,13 @@ package org.deeplearning4j.nn.layers;
 
 import org.deeplearning4j.berkeley.Pair;
 import org.deeplearning4j.nn.api.Layer;
-import org.deeplearning4j.nn.api.ParamInitializer;
+import org.deeplearning4j.nn.api.Updater;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.gradient.DefaultGradient;
 import org.deeplearning4j.nn.gradient.Gradient;
+import org.deeplearning4j.nn.layers.factory.LayerFactories;
 import org.deeplearning4j.nn.params.DefaultParamInitializer;
+import org.deeplearning4j.nn.params.PretrainParamInitializer;
 import org.deeplearning4j.optimize.Solver;
 import org.deeplearning4j.optimize.api.ConvexOptimizer;
 import org.deeplearning4j.optimize.api.IterationListener;
@@ -32,7 +34,6 @@ import org.deeplearning4j.util.Dropout;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.indexing.NDArrayIndex;
-import org.nd4j.linalg.ops.transforms.Transforms;
 
 import java.lang.reflect.Constructor;
 import java.util.*;
@@ -46,16 +47,20 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
         implements Layer {
 
     protected INDArray input;
+    protected INDArray paramsFlattened;
+    protected INDArray gradientsFlattened;
     protected Map<String,INDArray> params;
+    protected transient Map<String,INDArray> gradientViews;
     protected NeuralNetConfiguration conf;
     protected INDArray dropoutMask;
-    protected ParamInitializer paramInitializer;
+    protected boolean dropoutApplied = false;
     protected double score = 0.0;
     protected ConvexOptimizer optimizer;
     protected Gradient gradient;
     protected Collection<IterationListener> iterationListeners = new ArrayList<>();
     protected int index = 0;
-    protected int inputMiniBatchSize;
+    protected INDArray maskArray;
+    protected Solver solver;
 
     public BaseLayer(NeuralNetConfiguration conf) {
         this.conf = conf;
@@ -74,15 +79,10 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
         return input;
     }
 
-    public void setInput(INDArray input,boolean training) {
-        if(conf.getLayer().getDropOut() > 0 && training)
-            this.dropoutMask = Dropout.applyDropout(input,conf.getLayer().getDropOut(),dropoutMask);
-        this.input = input;
-    }
-
     @Override
     public void setInput(INDArray input) {
-        setInput(input,true);
+        this.input = input;
+        dropoutApplied = false;
     }
 
     @Override
@@ -143,13 +143,23 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
     @Override
     public Pair<Gradient,INDArray> backpropGradient(INDArray epsilon) {
         //If this layer is layer L, then epsilon is (w^(L+1)*(d^(L+1))^T) (or equivalent)
-        INDArray z = preOutput(input);
+        INDArray z = preOutput(true);   //Note: using preOutput(INDArray) can't be used as this does a setInput(input) and resets the 'appliedDropout' flag
         INDArray activationDerivative = Nd4j.getExecutioner().execAndReturn(Nd4j.getOpFactory().createTransform(conf().getLayer().getActivationFunction(), z).derivative());
         INDArray delta = epsilon.muli(activationDerivative);
 
+        if(maskArray != null){
+            delta.muliColumnVector(maskArray);
+        }
+
         Gradient ret = new DefaultGradient();
-        ret.gradientForVariable().put(DefaultParamInitializer.WEIGHT_KEY, delta.transpose().mmul(input).transpose());
-        ret.gradientForVariable().put(DefaultParamInitializer.BIAS_KEY, delta.sum(0));
+
+        INDArray weightGrad = gradientViews.get(DefaultParamInitializer.WEIGHT_KEY);    //f order
+        Nd4j.gemm(input,delta,weightGrad,true,false,1.0,0.0);
+        INDArray biasGrad = gradientViews.get(DefaultParamInitializer.BIAS_KEY);
+        biasGrad.assign(delta.sum(0));  //TODO: do this without the assign
+
+        ret.gradientForVariable().put(DefaultParamInitializer.WEIGHT_KEY, weightGrad);
+        ret.gradientForVariable().put(DefaultParamInitializer.BIAS_KEY, biasGrad);
         
         INDArray epsilonNext = params.get(DefaultParamInitializer.WEIGHT_KEY).mmul(delta.transpose()).transpose();
 
@@ -213,7 +223,7 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
     @Override
     public void iterate(INDArray input) {
         setInput(input.dup());
-        applyDropOutIfNecessary(this.input,true);
+        applyDropOutIfNecessary(true);
         Gradient gradient = gradient();
         for(String paramType : gradient.gradientForVariable().keySet()) {
             update(gradient.getGradientFor(paramType), paramType);
@@ -264,11 +274,17 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
 
     @Override
     public void setParam(String key, INDArray val) {
-        params.put(key, val);
+        if(params.containsKey(key)) params.get(key).assign(val);
+        else params.put(key, val);
     }
 
     @Override
     public void setParams(INDArray params) {
+        if(params == paramsFlattened) return;   //no op
+        setParams(params,'f');
+    }
+
+    protected void setParams(INDArray params, char order){
         List<String> parameterList = conf.variables();
         int length = 0;
         for(String s : parameterList)
@@ -282,11 +298,26 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
             INDArray get = params.get(NDArrayIndex.point(0),NDArrayIndex.interval(idx, idx + param.length()));
             if(param.length() != get.length())
                 throw new IllegalStateException("Parameter " + s + " should have been of length " + param.length() + " but was " + get.length());
-            setParam(s,get.reshape('f',param.shape()));
+            param.assign(get.reshape(order,param.shape())); //Use assign due to backprop params being a view of a larger array
             idx += param.length();
-
         }
+    }
 
+    @Override
+    public void setParamsViewArray(INDArray params){
+        if(this.params != null && params.length() != numParams()) throw new IllegalArgumentException("Invalid input: expect params of length " + numParams()
+            + ", got params of length " + params.length());
+
+        this.paramsFlattened = params;
+    }
+
+    @Override
+    public void setBackpropGradientsViewArray(INDArray gradients) {
+        if(this.params != null && gradients.length() != numParams(true)) throw new IllegalArgumentException("Invalid input: expect gradients array of length " + numParams(true)
+                + ", got params of length " + gradients.length());
+
+        this.gradientsFlattened = gradients;
+        this.gradientViews = LayerFactories.getFactory(conf).initializer().getGradientsFromFlattened(conf,gradients);
     }
 
     @Override
@@ -296,7 +327,8 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
 
     @Override
     public void initParams() {
-        paramInitializer.init(paramTable(), conf());
+//        paramInitializer.init(paramTable(), conf());
+        throw new UnsupportedOperationException("Not yet implemented");
     }
 
     @Override
@@ -306,44 +338,51 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
 
     @Override
     public INDArray preOutput(INDArray x, boolean training) {
-        if(x == null)
+        if (x == null)
             throw new IllegalArgumentException("No null input allowed");
+        setInput(x);
+        return preOutput(training);
+    }
 
-        setInput(x,training);
-        applyDropOutIfNecessary(x,training);
+    public INDArray preOutput(boolean training) {
+        applyDropOutIfNecessary(training);
         INDArray b = getParam(DefaultParamInitializer.BIAS_KEY);
         INDArray W = getParam(DefaultParamInitializer.WEIGHT_KEY);
-        if(conf.isUseDropConnect() && training) {
-            if (conf.getLayer().getDropOut() > 0) {
-                W = Dropout.applyDropConnect(this,DefaultParamInitializer.WEIGHT_KEY);
-            }
+        if(conf.isUseDropConnect() && training && conf.getLayer().getDropOut() > 0) {
+            W = Dropout.applyDropConnect(this,DefaultParamInitializer.WEIGHT_KEY);
         }
 
-        INDArray ret = x.mmul(W).addiRowVector(b);
+        INDArray ret = input.mmul(W).addiRowVector(b);
+
+        if(maskArray != null){
+            ret.muliColumnVector(maskArray);
+        }
+
         return ret;
     }
 
     @Override
     public INDArray activate(boolean training) {
-        INDArray b = getParam(DefaultParamInitializer.BIAS_KEY);
-        INDArray W = getParam(DefaultParamInitializer.WEIGHT_KEY);
-        if(conf.isUseDropConnect() && training) {
-            W = Dropout.applyDropConnect(this,DefaultParamInitializer.WEIGHT_KEY);
+        INDArray z = preOutput(training);
+        INDArray ret = Nd4j.getExecutioner().execAndReturn(Nd4j.getOpFactory().createTransform(
+                conf.getLayer().getActivationFunction(), z, conf.getExtraArgs() ));
+
+        if(maskArray != null){
+            ret.muliColumnVector(maskArray);
         }
 
-        INDArray ret = Nd4j.getExecutioner().execAndReturn(Nd4j.getOpFactory().createTransform(conf.getLayer().getActivationFunction(), input().mmul(W).addiRowVector(b)));
         return ret;
     }
 
     @Override
     public  INDArray activate(INDArray input) {
-        setInput(input, true);
+        setInput(input);
         return activate(true);
     }
 
     @Override
     public INDArray activate(INDArray input, boolean training) {
-        setInput(input, training);
+        setInput(input);
         return activate(training);
     }
 
@@ -363,19 +402,21 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
      */
     @Override
     public  INDArray preOutput(INDArray x) {
-        return preOutput(x,true);
+        return preOutput(x, true);
     }
 
     @Override
     public double calcL2() {
     	if(!conf.isUseRegularization() || conf.getLayer().getL2() <= 0.0 ) return 0.0;
-        return 0.5 * conf.getLayer().getL2()  * Transforms.pow(getParam(DefaultParamInitializer.WEIGHT_KEY),2).sum(Integer.MAX_VALUE).getDouble(0);
+        //L2 norm: sqrt( sum_i x_i^2 ) -> want sum squared weights, so l2 norm squared
+        double l2Norm = getParam(DefaultParamInitializer.WEIGHT_KEY).norm2Number().doubleValue();
+        return 0.5 * conf.getLayer().getL2() * l2Norm * l2Norm;
     }
 
     @Override
     public double calcL1() {
     	if(!conf.isUseRegularization() || conf.getLayer().getL1()  <= 0.0 ) return 0.0;
-        return conf.getLayer().getL1() * Transforms.abs(getParam(DefaultParamInitializer.WEIGHT_KEY)).sum(Integer.MAX_VALUE).getDouble(0);
+        return conf.getLayer().getL1() * getParam(DefaultParamInitializer.WEIGHT_KEY).norm1Number().doubleValue();
     }
 
     @Override
@@ -405,9 +446,10 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
         }
     }
 
-    protected void applyDropOutIfNecessary(INDArray input,boolean training) {
-        if(conf.getLayer().getDropOut() > 0 && !conf.isUseDropConnect() && training) {
-            dropoutMask = Dropout.applyDropout(input,conf.getLayer().getDropOut(),dropoutMask);
+    protected void applyDropOutIfNecessary(boolean training) {
+        if(conf.getLayer().getDropOut() > 0 && !conf.isUseDropConnect() && training && !dropoutApplied ) {
+            Dropout.applyDropout(input,conf.getLayer().getDropOut());
+            dropoutApplied = true;
         }
     }
 
@@ -429,8 +471,9 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
             Constructor c = getClass().getConstructor(NeuralNetConfiguration.class);
             layer = (Layer) c.newInstance(conf);
             Map<String,INDArray> linkedTable = new LinkedHashMap<>();
-            for(String s: params.keySet())
-                linkedTable.put(s,params.get(s).dup());
+            for (Map.Entry<String, INDArray> entry : params.entrySet()) {
+                linkedTable.put(entry.getKey(),entry.getValue().dup());
+            }
             layer.setParamTable(linkedTable);
         } catch (Exception e) {
             e.printStackTrace();
@@ -459,14 +502,34 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
     }
 
     @Override
+    public int numParams(boolean backwards) {
+        if(backwards){
+            int ret = 0;
+            for(Map.Entry<String,INDArray> entry : params.entrySet()){
+                if(this instanceof BasePretrainNetwork && PretrainParamInitializer.VISIBLE_BIAS_KEY.equals(entry.getKey())) continue;
+                ret += entry.getValue().length();
+            }
+            return ret;
+        }
+        else
+            return numParams();
+    }
+
+    @Override
     public void fit(INDArray input) {
         if(input != null) {
             setInput(input.dup());
-            applyDropOutIfNecessary(this.input,true);
+            applyDropOutIfNecessary(true);
         }
-        Solver solver = new Solver.Builder()
-                .model(this).configure(conf()).listeners(getListeners())
-                .build();
+        if(solver == null){
+            solver = new Solver.Builder()
+                    .model(this).configure(conf()).listeners(getListeners())
+                    .build();
+            //Set the updater state view array. For MLN and CG, this is done by MultiLayerUpdater and ComputationGraphUpdater respectively
+            Updater updater = solver.getOptimizer().getUpdater();
+            int updaterStateSize = updater.stateSizeForLayer(this);
+            if(updaterStateSize > 0) updater.setStateViewArray(this, Nd4j.createUninitialized(new int[]{1,updaterStateSize},Nd4j.order()), true);
+        }
         this.optimizer = solver.getOptimizer();
         solver.optimize();
     }
@@ -514,7 +577,6 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
                 ", input=" + input +
                 ", params=" + params +
                 ", dropoutMask=" + dropoutMask +
-                ", paramInitializer=" + paramInitializer +
                 ", score=" + score +
                 ", optimizer=" + optimizer +
                 ", listeners=" + iterationListeners +
@@ -526,20 +588,37 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
         if(!(conf.getLayer() instanceof org.deeplearning4j.nn.conf.layers.FeedForwardLayer))
             throw new UnsupportedOperationException("unsupported layer type: " + conf.getLayer().getClass().getName());
 
-        INDArray W = getParam(DefaultParamInitializer.WEIGHT_KEY);
+        INDArray w = getParam(DefaultParamInitializer.WEIGHT_KEY);
         INDArray b = getParam(DefaultParamInitializer.BIAS_KEY);
+        INDArray vb = getParam(PretrainParamInitializer.VISIBLE_BIAS_KEY);
         Layer layer;
         try {
-            Constructor c = getClass().getConstructor(NeuralNetConfiguration.class, INDArray.class, INDArray.class, INDArray.class);
             NeuralNetConfiguration clone = conf.clone();  // assume a deep clone here
 
             org.deeplearning4j.nn.conf.layers.FeedForwardLayer clonedLayerConf =
                     (org.deeplearning4j.nn.conf.layers.FeedForwardLayer) clone.getLayer();
-            int nIn = clonedLayerConf.getNOut(), nOut = clonedLayerConf.getNIn();
+            int nIn = clonedLayerConf.getNOut();
+            int nOut = clonedLayerConf.getNIn();
             clonedLayerConf.setNIn(nIn);
             clonedLayerConf.setNOut(nOut);
 
-            layer = (Layer) c.newInstance(conf, W.transpose(), b.transpose(), input != null ? input.transpose() : null);
+            //Need to swap the hidden and visible biases for pretrain layers
+            INDArray newB;
+            INDArray newVB = null;
+
+            if(vb != null){
+                newB = vb.dup();
+                newVB = b.dup();
+            } else {
+                newB = Nd4j.create(1,nOut);
+            }
+
+            INDArray paramsView = Nd4j.create(1,w.length() + nOut);
+            layer = LayerFactories.getFactory(clone).create(clone, iterationListeners, this.index, paramsView, true);
+
+            layer.setParam(DefaultParamInitializer.WEIGHT_KEY,w.transpose().dup());
+            layer.setParam(DefaultParamInitializer.BIAS_KEY,newB);
+            if(vb != null) layer.setParam(PretrainParamInitializer.VISIBLE_BIAS_KEY, newVB);
         } catch (Exception e) {
             throw new RuntimeException("unable to construct transposed layer", e);
         }
@@ -554,11 +633,21 @@ public abstract class BaseLayer<LayerConfT extends org.deeplearning4j.nn.conf.la
 
     @Override
     public void setInputMiniBatchSize(int size){
-    	this.inputMiniBatchSize = size;
     }
 
     @Override
     public int getInputMiniBatchSize(){
-    	return inputMiniBatchSize;
+    	return input.size(0);
+    }
+
+    @Override
+    public void applyLearningRateScoreDecay() {
+        for (Map.Entry<String, Double> lrPair : conf.getLearningRateByParam().entrySet())
+            conf.setLearningRateByParam(lrPair.getKey(), lrPair.getValue() * (conf.getLrPolicyDecayRate() + Nd4j.EPS_THRESHOLD));
+    }
+
+    @Override
+    public void setMaskArray(INDArray maskArray) {
+        this.maskArray = maskArray;
     }
 }

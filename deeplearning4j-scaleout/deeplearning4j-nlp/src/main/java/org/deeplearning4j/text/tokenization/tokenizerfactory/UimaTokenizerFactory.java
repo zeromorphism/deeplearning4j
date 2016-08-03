@@ -18,8 +18,6 @@
 
 package org.deeplearning4j.text.tokenization.tokenizerfactory;
 
-import java.io.InputStream;
-
 import org.apache.uima.analysis_engine.AnalysisEngine;
 import org.apache.uima.fit.factory.AnalysisEngineFactory;
 import org.apache.uima.resource.ResourceInitializationException;
@@ -29,6 +27,8 @@ import org.deeplearning4j.text.tokenization.tokenizer.TokenPreProcess;
 import org.deeplearning4j.text.tokenization.tokenizer.Tokenizer;
 import org.deeplearning4j.text.tokenization.tokenizer.UimaTokenizer;
 import org.deeplearning4j.text.uima.UimaResource;
+
+import java.io.InputStream;
 
 
 /**
@@ -44,7 +44,7 @@ public class UimaTokenizerFactory implements TokenizerFactory {
 	private UimaResource uimaResource;
 	private boolean checkForLabel;
 	private static AnalysisEngine defaultAnalysisEngine;
-  private TokenPreProcess preProcess;
+	private TokenPreProcess preProcess;
 
 	public UimaTokenizerFactory() throws ResourceInitializationException {
 		this(defaultAnalysisEngine(),true);
@@ -82,8 +82,8 @@ public class UimaTokenizerFactory implements TokenizerFactory {
 		if(toTokenize == null)
 			throw new IllegalArgumentException("Unable to proceed; on sentence to tokenize");
 		Tokenizer ret = new UimaTokenizer(toTokenize,uimaResource,checkForLabel);
-        ret.setTokenPreProcessor(preProcess);
-        return ret;
+		ret.setTokenPreProcessor(preProcess);
+		return ret;
 	}
 
 	public UimaResource getUimaResource() {
@@ -115,10 +115,20 @@ public class UimaTokenizerFactory implements TokenizerFactory {
 		throw new UnsupportedOperationException();
 	}
 
-    @Override
-    public void setTokenPreProcessor(TokenPreProcess preProcessor) {
-        this.preProcess = preProcessor;
-    }
+	@Override
+	public void setTokenPreProcessor(TokenPreProcess preProcessor) {
+		this.preProcess = preProcessor;
+	}
+
+	/**
+	 * Returns TokenPreProcessor set for this TokenizerFactory instance
+	 *
+	 * @return TokenPreProcessor instance, or null if no preprocessor was defined
+	 */
+	@Override
+	public TokenPreProcess getTokenPreProcessor() {
+		return preProcess;
+	}
 
 
 }

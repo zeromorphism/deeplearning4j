@@ -18,7 +18,7 @@
 
 package org.deeplearning4j.aws.ec2;
 
-import com.amazonaws.regions.*;
+import com.amazonaws.regions.Regions;
 import com.amazonaws.services.ec2.AmazonEC2;
 import com.amazonaws.services.ec2.model.*;
 import org.deeplearning4j.aws.s3.BaseS3;
@@ -91,7 +91,7 @@ public class Ec2BoxCreator extends BaseS3 {
 		launchSpecification.setInstanceType("t1.micro");
 
 		// Add the security group to the request.
-		List<String> securityGroups = new ArrayList<String>();
+		List<String> securityGroups = new ArrayList<>();
 		securityGroups.add("GettingStartedGroup");
 		launchSpecification.setSecurityGroups(securityGroups);
 

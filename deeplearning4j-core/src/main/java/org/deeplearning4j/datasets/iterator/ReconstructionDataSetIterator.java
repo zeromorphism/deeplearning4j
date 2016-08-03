@@ -19,7 +19,12 @@
 package org.deeplearning4j.datasets.iterator;
 
 
+import lombok.Getter;
 import org.nd4j.linalg.dataset.DataSet;
+import org.nd4j.linalg.dataset.api.DataSetPreProcessor;
+import org.nd4j.linalg.dataset.api.iterator.DataSetIterator;
+
+import java.util.List;
 
 /**
  * Wraps a data applyTransformToDestination iterator setting the first (feature matrix) as
@@ -30,7 +35,7 @@ import org.nd4j.linalg.dataset.DataSet;
 public class ReconstructionDataSetIterator implements DataSetIterator {
 
     private DataSetIterator iter;
-    private DataSetPreProcessor preProcessor;
+    @Getter private DataSetPreProcessor preProcessor;
     public ReconstructionDataSetIterator(DataSetIterator iter) {
         this.iter = iter;
     }
@@ -79,6 +84,11 @@ public class ReconstructionDataSetIterator implements DataSetIterator {
         return iter.totalOutcomes();
     }
 
+    @Override
+    public boolean resetSupported(){
+        return iter.resetSupported();
+    }
+
     /**
      * Resets the iterator back to the beginning
      */
@@ -118,10 +128,14 @@ public class ReconstructionDataSetIterator implements DataSetIterator {
     }
 
     @Override
-    public void setPreProcessor(org.nd4j.linalg.dataset.api.DataSetPreProcessor preProcessor) {
-        this.preProcessor = (DataSetPreProcessor) preProcessor;
+    public void setPreProcessor(DataSetPreProcessor preProcessor) {
+        this.preProcessor = preProcessor;
     }
 
+    @Override
+    public List<String> getLabels() {
+        return null;
+    }
 
 
     /**

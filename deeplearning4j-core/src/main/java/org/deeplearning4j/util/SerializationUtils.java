@@ -18,14 +18,9 @@
 
 package org.deeplearning4j.util;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.InputStream;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.OutputStream;
-import java.io.Serializable;
 import org.apache.commons.io.FileUtils;
+
+import java.io.*;
 
 /**
  * Serialization utils for saving and reading serializable objects
@@ -34,13 +29,24 @@ import org.apache.commons.io.FileUtils;
  */
 public class SerializationUtils {
 
+	private SerializationUtils() {
+	}
+
 	@SuppressWarnings("unchecked")
 	public static <T> T readObject(File file) {
+		ObjectInputStream ois = null;
 		try {
-			ObjectInputStream ois = new ObjectInputStream(FileUtils.openInputStream(file));
+			ois = new ObjectInputStream(FileUtils.openInputStream(file));
 			return (T) ois.readObject();
 		} catch (Exception e) {
 			throw new RuntimeException(e);
+		} finally {
+			if (ois != null)
+				try {
+					ois.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
 		}
 		
 	}
@@ -84,7 +90,7 @@ public class SerializationUtils {
 
 	/**
 	 * Writes the object to the output stream
-	 * THIS DOES NOT FLUSH THE STREAM
+	 * THIS DOES NOT FLUSH THE STREAMMultiLayerNetwork
 	 * @param toSave the object to save
 	 * @param writeTo the output stream to write to
 	 */

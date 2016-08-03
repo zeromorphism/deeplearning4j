@@ -18,11 +18,12 @@
 
 package org.deeplearning4j.text.stopwords;
 
+import org.apache.commons.io.IOUtils;
+import org.datavec.api.util.ClassPathResource;
+
 import java.io.IOException;
 import java.util.List;
 
-import org.apache.commons.io.IOUtils;
-import org.springframework.core.io.ClassPathResource;
 /**
  * Loads stop words from the class path
  * @author Adam Gibson
@@ -31,6 +32,9 @@ import org.springframework.core.io.ClassPathResource;
 public class StopWords {
 
 	private static List<String> stopWords;
+
+	private StopWords() {
+	}
 
 	@SuppressWarnings("unchecked")
 	public static List<String> getStopWords() {

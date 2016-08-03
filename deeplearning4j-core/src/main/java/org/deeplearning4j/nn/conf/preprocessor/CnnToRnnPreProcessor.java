@@ -2,11 +2,13 @@ package org.deeplearning4j.nn.conf.preprocessor;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import lombok.AllArgsConstructor;
+import lombok.AccessLevel;
 import lombok.Data;
-import org.deeplearning4j.nn.api.Layer;
+import lombok.Getter;
+import lombok.Setter;
 import org.deeplearning4j.nn.conf.InputPreProcessor;
 import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.util.ArrayUtil;
 
 import java.util.Arrays;
 
@@ -28,6 +30,9 @@ public class CnnToRnnPreProcessor implements InputPreProcessor {
     private int inputHeight;
     private int inputWidth;
     private int numChannels;
+
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
     private int product;
 
     @JsonCreator
@@ -41,38 +46,45 @@ public class CnnToRnnPreProcessor implements InputPreProcessor {
     }
 
     @Override
-    public INDArray preProcess(INDArray input, Layer layer) {
+    public INDArray preProcess(INDArray input, int miniBatchSize) {
         if(input.rank() != 4) throw new IllegalArgumentException("Invalid input: expect CNN activations with rank 4 (received input with shape "
             + Arrays.toString(input.shape())+")");
         //Input: 4d activations (CNN)
         //Output: 3d activations (RNN)
 
+        if(input.ordering() != 'c') input = input.dup('c');
+
         int[] shape = input.shape();    //[timeSeriesLength*miniBatchSize, numChannels, inputHeight, inputWidth]
-        int miniBatchSize = layer.getInputMiniBatchSize();
-        INDArray reshaped = input.reshape(miniBatchSize,shape[0]/miniBatchSize,product);
+
+        //First: reshape 4d to 2d, as per CnnToFeedForwardPreProcessor
+        INDArray twod = input.reshape('c',input.size(0), ArrayUtil.prod(input.shape())/input.size(0));
+        //Second: reshape 2d to 3d, as per FeedForwardToRnnPreProcessor
+        INDArray reshaped = twod.dup('f').reshape('f',miniBatchSize,shape[0]/miniBatchSize,product);
         return reshaped.permute(0,2,1);
     }
 
     @Override
-    public INDArray backprop(INDArray output, Layer layer) {
+    public INDArray backprop(INDArray output, int miniBatchSize) {
+        if(output.ordering() == 'c') output = output.dup('f');
+
         int[] shape = output.shape();
         INDArray output2d;
         if(shape[0]==1){
             //Edge case: miniBatchSize = 1
-            output2d = output.tensorAlongDimension(0,1,2);
+            output2d = output.tensorAlongDimension(0,1,2).permutei(1,0);
         } else if(shape[2]==1){
             //Edge case: timeSeriesLength = 1
             output2d = output.tensorAlongDimension(0,1,0);
         } else {
-            INDArray permuted3d = output.permute(0, 2, 1);	//Permute, so we get correct order after reshaping
-            output2d = permuted3d.reshape(shape[0]*shape[2],shape[1]);    //normally what would be returned for FF layers
+            //As per FeedForwardToRnnPreprocessor
+            INDArray permuted3d = output.permute(0, 2, 1);
+            output2d = permuted3d.reshape('f',shape[0]*shape[2],shape[1]);
         }
 
         if(shape[1] != product)
             throw new IllegalArgumentException("Invalid input: expected output size(1)="+shape[1]+" must be equal to "
                 + inputHeight + " x columns " + inputWidth + " x depth " + numChannels +" = " + product + ", received: " + shape[1]);
-        //INDArray output2d = permuted3d.reshape(shape[0]*shape[2],shape[1]);    //normally what would be returned for FF layers
-        return output2d.reshape(output2d.size(0), numChannels, inputHeight, inputWidth);
+        return output2d.dup('c').reshape('c',output2d.size(0), numChannels, inputHeight, inputWidth);
     }
 
     @Override

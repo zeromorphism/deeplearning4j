@@ -1,10 +1,5 @@
 package org.deeplearning4j.nn.layers.recurrent;
 
-import static org.junit.Assert.*;
-
-import java.util.List;
-import java.util.Random;
-
 import org.deeplearning4j.berkeley.Pair;
 import org.deeplearning4j.nn.conf.MultiLayerConfiguration;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
@@ -16,15 +11,22 @@ import org.deeplearning4j.nn.layers.factory.LayerFactories;
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
 import org.deeplearning4j.nn.params.GRUParamInitializer;
 import org.deeplearning4j.nn.weights.WeightInit;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.lossfunctions.LossFunctions.LossFunction;
 
+import java.util.List;
+import java.util.Random;
+
+import static org.junit.Assert.*;
+
 
 public class GRUTest {
 	
 	@Test
+    @Ignore
 	public void testGRUForwardBasic(){
 		//Very basic test of forward pass for GRU layer.
 		//Essentially make sure it doesn't throw any exceptions, and provides output in the correct shape.
@@ -39,8 +41,10 @@ public class GRUTest {
 						.activation("tanh")
 						.build())
 				.build();
-	
-		GRU layer = LayerFactories.getFactory(conf.getLayer()).create(conf);
+
+		int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+		INDArray params = Nd4j.create(1, numParams);
+		GRU layer = LayerFactories.getFactory(conf.getLayer()).create(conf,null,0,params,true);
 		
 		//Data: has shape [miniBatchSize,nIn,timeSeriesLength];
 		//Output/activations has shape [miniBatchsize,nHiddenUnits,timeSeriesLength];
@@ -63,6 +67,7 @@ public class GRUTest {
 	}
 	
 	@Test
+    @Ignore
 	public void testGRUBackwardBasic(){
 		//Very basic test of backprop for mini-batch + time series
 		//Essentially make sure it doesn't throw any exceptions, and provides output in the correct shape. 
@@ -86,8 +91,10 @@ public class GRUTest {
 						.activation("tanh")
 						.build())
 				.build();
-		
-		GRU gru = LayerFactories.getFactory(conf.getLayer()).create(conf);
+
+		int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+		INDArray params = Nd4j.create(1, numParams);
+		GRU gru = LayerFactories.getFactory(conf.getLayer()).create(conf,null,0,params,true);
 		//Set input, do a forward pass:
 		gru.activate(inputData);
 		assertNotNull(gru.input());
@@ -115,6 +122,7 @@ public class GRUTest {
 	
 	
 	@Test
+    @Ignore
 	public void testForwardPassSanityCheck(){
 		//Set up a basic GRU+OutputLayer network and do a sanity check on forward pass (i.e., check not NaN or Inf.)
 		Random r = new Random(12345L);
@@ -135,7 +143,7 @@ public class GRUTest {
 		
 		MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
 			.regularization(false)
-			.list(2)
+			.list()
 			.layer(0, new org.deeplearning4j.nn.conf.layers.GRU.Builder().activation("tanh")
 				.weightInit(WeightInit.DISTRIBUTION).dist(new NormalDistribution(0,0.1))
             	.nIn(nIn).nOut(gruNUnits).build())

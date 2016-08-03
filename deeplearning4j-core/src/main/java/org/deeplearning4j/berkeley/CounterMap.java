@@ -162,7 +162,7 @@ public class CounterMap<K, V> implements java.io.Serializable {
      */
     protected Counter<V> buildCounter(MapFactory<V, Double> mf)
     {
-        return new Counter<V>(mf);
+        return new Counter<>(mf);
     }
 
     /**
@@ -294,7 +294,7 @@ public class CounterMap<K, V> implements java.io.Serializable {
             Counter<V> counter = entry.getValue();
             V localMax = counter.argMax();
             if (counter.getCount(localMax) > maxCount || maxKey == null) {
-                maxKey = new Pair<K, V>(entry.getKey(), localMax);
+                maxKey = new Pair<>(entry.getKey(), localMax);
                 maxCount = counter.getCount(localMax);
             }
         }
@@ -323,11 +323,12 @@ public class CounterMap<K, V> implements java.io.Serializable {
     public String toString(Collection<String> keyFilter) {
         StringBuilder sb = new StringBuilder("[\n");
         for (Map.Entry<K, Counter<V>> entry : counterMap.entrySet()) {
-            if (keyFilter != null && !keyFilter.contains(entry.getKey())) {
+            String keyString = entry.getKey().toString();
+            if (keyFilter != null && !keyFilter.contains(keyString)) {
                 continue;
             }
             sb.append("  ");
-            sb.append(entry.getKey());
+            sb.append(keyString);
             sb.append(" -> ");
             sb.append(entry.getValue().toString(20));
             sb.append("\n");
@@ -376,7 +377,7 @@ public class CounterMap<K, V> implements java.io.Serializable {
     }
 
     public static void main(String[] args) {
-        CounterMap<String, String> bigramCounterMap = new CounterMap<String, String>();
+        CounterMap<String, String> bigramCounterMap = new CounterMap<>();
         bigramCounterMap.incrementCount("people", "run", 1);
         bigramCounterMap.incrementCount("cats", "growl", 2);
         bigramCounterMap.incrementCount("cats", "scamper", 3);
@@ -414,7 +415,7 @@ public class CounterMap<K, V> implements java.io.Serializable {
      * @return
      */
     public CounterMap<V,K> invert() {
-        CounterMap<V,K> invertCounterMap = new CounterMap<V, K>();
+        CounterMap<V,K> invertCounterMap = new CounterMap<>();
         for (K key: this.keySet()) {
             Counter<V> keyCounts = this.getCounter(key);
             for (V val: keyCounts.keySet()) {

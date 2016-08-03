@@ -38,4 +38,5 @@ public class OutputLayer extends BaseOutputLayer<org.deeplearning4j.nn.conf.laye
     public OutputLayer(NeuralNetConfiguration conf, INDArray input) {
         super(conf, input);
     }
+
 }

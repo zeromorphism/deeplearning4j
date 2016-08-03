@@ -1,14 +1,6 @@
 package org.deeplearning4j.optimize.solver;
 
-import static org.junit.Assert.*;
-
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Map;
-
 import org.deeplearning4j.berkeley.Pair;
-import org.deeplearning4j.datasets.iterator.DataSetIterator;
 import org.deeplearning4j.datasets.iterator.impl.IrisDataSetIterator;
 import org.deeplearning4j.nn.api.Layer;
 import org.deeplearning4j.nn.api.Model;
@@ -26,9 +18,9 @@ import org.deeplearning4j.nn.weights.WeightInit;
 import org.deeplearning4j.optimize.api.ConvexOptimizer;
 import org.deeplearning4j.optimize.api.IterationListener;
 import org.deeplearning4j.optimize.solvers.ConjugateGradient;
+import org.deeplearning4j.optimize.solvers.LBFGS;
 import org.deeplearning4j.optimize.solvers.LineGradientDescent;
 import org.deeplearning4j.optimize.solvers.StochasticGradientDescent;
-import org.deeplearning4j.optimize.solvers.LBFGS;
 import org.deeplearning4j.optimize.stepfunctions.NegativeDefaultStepFunction;
 import org.junit.Test;
 import org.nd4j.linalg.api.complex.IComplexNumber;
@@ -38,9 +30,17 @@ import org.nd4j.linalg.api.ops.impl.transforms.Sin;
 import org.nd4j.linalg.api.rng.DefaultRandom;
 import org.nd4j.linalg.api.rng.Random;
 import org.nd4j.linalg.dataset.DataSet;
+import org.nd4j.linalg.dataset.api.iterator.DataSetIterator;
 import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.indexing.conditions.Condition;
 import org.nd4j.linalg.lossfunctions.LossFunctions.LossFunction;
+
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Map;
+
+import static org.junit.Assert.assertTrue;
 
 public class TestOptimizers {
 
@@ -87,49 +87,48 @@ public class TestOptimizers {
         ds.normalizeZeroMeanZeroUnitVariance();
 
         for( OptimizationAlgorithm oa : toTest) {
-            int nIter = 5;
+            int nIter = 10;
             MultiLayerNetwork network = new MultiLayerNetwork(getMLPConfigIris(oa,nIter));
             network.init();
             double score = network.score(ds);
             assertTrue(score != 0.0 && !Double.isNaN(score));
 
-            if(PRINT_OPT_RESULTS) System.out.println("testOptimizersMLP() - " + oa );
+            if(PRINT_OPT_RESULTS)
+                System.out.println("testOptimizersMLP() - " + oa );
 
             int nCallsToOptimizer = 30;
             double[] scores = new double[nCallsToOptimizer + 1];
             scores[0] = score;
             for(int i = 0; i < nCallsToOptimizer; i++) {
                 network.fit(ds);
-                network.computeGradientAndScore();
-                double scoreAfter = network.score();
+                double scoreAfter = network.score(ds);
                 scores[i + 1] = scoreAfter;
                 assertTrue("Score is NaN after optimization", !Double.isNaN(scoreAfter));
-                assertTrue("OA= " + oa+", before= " + score + ", after= " + scoreAfter,scoreAfter < score);
+                assertTrue("OA= " + oa+", before= " + score + ", after= " + scoreAfter,scoreAfter <= score);
                 score = scoreAfter;
             }
+
             if(PRINT_OPT_RESULTS)
                 System.out.println(oa + " - " + Arrays.toString(scores));
         }
     }
 
-    private static MultiLayerConfiguration getMLPConfigIris( OptimizationAlgorithm oa, int nIterations) {
+    private static MultiLayerConfiguration getMLPConfigIris(OptimizationAlgorithm oa, int nIterations) {
         MultiLayerConfiguration c = new NeuralNetConfiguration.Builder()
                 .optimizationAlgo(oa)
                 .iterations(nIterations)
-                .constrainGradientToUnitNorm(false)
-                .regularization(false)
-                .learningRate(0.1)
+                .learningRate(1e-1)
                 .seed(12345L)
-                .list(2)
+                .list()
                 .layer(0, new DenseLayer.Builder().nIn(4).nOut(3)
                         .weightInit(WeightInit.XAVIER)
-                        .updater((oa == OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT ? Updater.SGD : Updater.NONE))
+                        .updater(Updater.ADAGRAD)
                         .activation("relu")
                         .build())
                 .layer(1, new OutputLayer.Builder(LossFunction.MCXENT)
                         .nIn(3).nOut(3)
                         .weightInit(WeightInit.XAVIER)
-                        .updater((oa == OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT ? Updater.SGD : Updater.NONE))
+                        .updater(Updater.ADAGRAD)
                         .activation("softmax")
                         .build())
                 .backprop(true).pretrain(false)
@@ -177,7 +176,7 @@ public class TestOptimizers {
     }
 
     @Test
-    public void testSphereFnOptLBFGS(){
+    public void testSphereFnOptLBFGS() {
         //Test a single line search with calculated search direction (with multiple line search iterations)
         int[] numLineSearchIter = {5,10};
         for( int n : numLineSearchIter )
@@ -204,7 +203,6 @@ public class TestOptimizers {
                         .nOut(1)
                         .updater(Updater.SGD)
                         .build())
-                .batchSize(1)
                 .build();
         conf.addVariable("x");	//Normally done by ParamInitializers, but obviously that isn't done here
 
@@ -284,7 +282,7 @@ public class TestOptimizers {
     }
 
 
-    private static void testSphereFnMultipleStepsHelper( OptimizationAlgorithm oa, int nOptIter, int maxNumLineSearchIter ){
+    private static void testSphereFnMultipleStepsHelper( OptimizationAlgorithm oa, int nOptIter, int maxNumLineSearchIter) {
         double[] scores = new double[nOptIter + 1];
 
         for( int i = 0; i <= nOptIter; i++ ){
@@ -295,11 +293,10 @@ public class TestOptimizers {
                     .maxNumLineSearchIterations(maxNumLineSearchIter)
                     .iterations(i)
                     .learningRate(0.1)
-                    .layer(new RBM.Builder()
+                    .layer(new DenseLayer.Builder()
                             .nIn(1).nOut(1)
-                            .updater((oa == OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT ? Updater.SGD : Updater.ADAGRAD))
-                            .build())
-                    .batchSize(1).build();
+                            .updater(Updater.SGD)
+                            .build()).build();
             conf.addVariable("x");	//Normally done by ParamInitializers, but obviously that isn't done here
 
             Model m = new SphereFunctionModel(100,dist,conf);
@@ -352,6 +349,26 @@ public class TestOptimizers {
         }
 
         @Override
+        public int numParams(boolean backwards) {
+            return 0;
+        }
+
+        @Override
+        public void setParamsViewArray(INDArray params) {
+            throw new UnsupportedOperationException("Not supported");
+        }
+
+        @Override
+        public void setBackpropGradientsViewArray(INDArray gradients) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void applyLearningRateScoreDecay() {
+
+        }
+
+        @Override
         public void setListeners(IterationListener... listeners) {
 
         }
@@ -374,7 +391,7 @@ public class TestOptimizers {
 
     @Test
     public void testRastriginFnOptStochGradDescentMultipleSteps(){
-        testRastriginFnMultipleStepsHelper(OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT,10,20);
+        testRastriginFnMultipleStepsHelper(OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT,5,20);
     }
 
     @Test
@@ -393,27 +410,29 @@ public class TestOptimizers {
     }
 
 
-    private static void testRastriginFnMultipleStepsHelper( OptimizationAlgorithm oa, int nOptIter, int maxNumLineSearchIter ){
+    private static void testRastriginFnMultipleStepsHelper( OptimizationAlgorithm oa, int nOptIter, int maxNumLineSearchIter) {
         double[] scores = new double[nOptIter + 1];
 
-        for( int i = 0; i <= nOptIter; i++ ){
+        for( int i = 0; i <= nOptIter; i++) {
             NeuralNetConfiguration conf = new NeuralNetConfiguration.Builder()
                     .maxNumLineSearchIterations(maxNumLineSearchIter)
-                    .iterations(i)
+                    .iterations(i).miniBatch(false)
                     .learningRate(1e-2)
-                    .layer(new RBM.Builder()
+                    .layer(new DenseLayer.Builder()
                             .nIn(1).nOut(1)
-                            .updater((oa == OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT ? Updater.SGD : Updater.NONE))
+                            .updater(Updater.ADAGRAD)
                             .build())
-                    .batchSize(1).build();
+                   .build();
             conf.addVariable("x");	//Normally done by ParamInitializers, but obviously that isn't done here
 
             Model m = new RastriginFunctionModel(100,conf);
+            int nParams = m.numParams();
             if(i == 0) {
                 m.computeGradientAndScore();
                 scores[0] = m.score();	//Before optimization
             } else {
                 ConvexOptimizer opt = getOptimizer(oa,conf,m);
+                opt.getUpdater().setStateViewArray((Layer)m,Nd4j.createUninitialized(new int[]{1,nParams},'c'),true);
                 opt.optimize();
                 m.computeGradientAndScore();
                 scores[i] = m.score();
@@ -495,6 +514,25 @@ public class TestOptimizers {
             this.score =  costFn;
         }
 
+        @Override
+        public int numParams(boolean backwards) {
+            return 0;
+        }
+
+        @Override
+        public void setParamsViewArray(INDArray params) {
+            throw new UnsupportedOperationException("Not supported");
+        }
+
+        @Override
+        public void setBackpropGradientsViewArray(INDArray gradients) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void applyLearningRateScoreDecay() {
+
+        }
 
 
         @Override
@@ -545,7 +583,7 @@ public class TestOptimizers {
                             .nIn(1).nOut(1)
                             .updater(Updater.SGD)
                             .build())
-                    .batchSize(1).build();
+                    .build();
             conf.addVariable("x");	//Normally done by ParamInitializers, but obviously that isn't done here
 
             Model m = new RosenbrockFunctionModel(100,conf);
@@ -630,13 +668,13 @@ public class TestOptimizers {
                 }
 
                 @Override
-                public Boolean apply(IComplexNumber input){ throw new UnsupportedOperationException(); };
+                public Boolean apply(IComplexNumber input){ throw new UnsupportedOperationException(); }
             });
 
             int nExceeds5 = paramExceeds5.sum(Integer.MAX_VALUE).getInt(0);
             if(nExceeds5 > 0)
                 this.score =  Double.POSITIVE_INFINITY;
-             else {
+            else {
                 double score = 0.0;
                 for( int i = 0; i < nDims - 1; i++ ){
                     double xi = parameters.getDouble(i);
@@ -651,7 +689,25 @@ public class TestOptimizers {
 
         }
 
+        @Override
+        public int numParams(boolean backwards) {
+            return 0;
+        }
 
+        @Override
+        public void setParamsViewArray(INDArray params) {
+            throw new UnsupportedOperationException("Not supported");
+        }
+
+        @Override
+        public void setBackpropGradientsViewArray(INDArray gradients) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void applyLearningRateScoreDecay() {
+
+        }
 
 
         @Override
@@ -891,5 +947,7 @@ public class TestOptimizers {
         @Override
         public int getInputMiniBatchSize(){ return 1; }
 
+        @Override
+        public void setMaskArray(INDArray maskArray) { }
     }
 }

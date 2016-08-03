@@ -75,8 +75,11 @@ public class IterativeReduceFlatMap implements FlatMapFunction<Iterator<DataSet>
         log.debug("Training on " + data.labelCounts());
         NeuralNetConfiguration conf = NeuralNetConfiguration.fromJson(json);
         LayerFactory layerFactory = LayerFactories.getFactory(conf.getLayer());
-        Layer network = layerFactory.create(conf);
-        INDArray val = params.value();
+        int numParams = layerFactory.initializer().numParams(conf,true);
+        INDArray thisParams = Nd4j.create(1, numParams);
+        Layer network = layerFactory.create(conf, null, 0, thisParams, true);
+        network.setBackpropGradientsViewArray(Nd4j.create(1,numParams));
+        INDArray val = params.value().dup();
         if(val.length() != network.numParams())
             throw new IllegalStateException("Network did not have same number of parameters as the broadcasted set parameters");
         network.setParams(val);

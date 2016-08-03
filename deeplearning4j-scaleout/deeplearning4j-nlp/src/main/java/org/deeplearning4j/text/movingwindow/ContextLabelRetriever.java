@@ -20,9 +20,9 @@ package org.deeplearning4j.text.movingwindow;
 
 import org.deeplearning4j.berkeley.Pair;
 import org.deeplearning4j.berkeley.StringUtils;
-import org.deeplearning4j.util.MultiDimensionalMap;
 import org.deeplearning4j.text.tokenization.tokenizer.Tokenizer;
 import org.deeplearning4j.text.tokenization.tokenizerfactory.TokenizerFactory;
+import org.deeplearning4j.util.MultiDimensionalMap;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -106,7 +106,7 @@ public class ContextLabelRetriever {
         }
 
         //now join the output
-        StringBuffer strippedSentence = new StringBuffer();
+        StringBuilder strippedSentence = new StringBuilder();
         for(Pair<String,List<String>> tokensWithLabel : tokensWithSameLabel) {
             String joinedSentence = StringUtils.join(tokensWithLabel.getSecond()," ");
             //spaces between separate parts of the sentence

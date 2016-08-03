@@ -18,14 +18,14 @@
 
 package org.deeplearning4j.clustering.algorithm.iteration;
 
+import org.deeplearning4j.clustering.cluster.info.ClusterSetInfo;
+
 import java.util.HashMap;
 import java.util.Map;
 
-import org.deeplearning4j.clustering.cluster.info.ClusterSetInfo;
-
 public class IterationHistory {
 
-	private Map<Integer, IterationInfo> iterationsInfos = new HashMap<Integer, IterationInfo>();
+	private Map<Integer, IterationInfo> iterationsInfos = new HashMap<>();
 	
 	public ClusterSetInfo getMostRecentClusterSetInfo() {
 		IterationInfo iterationInfo = getMostRecentIterationInfo();

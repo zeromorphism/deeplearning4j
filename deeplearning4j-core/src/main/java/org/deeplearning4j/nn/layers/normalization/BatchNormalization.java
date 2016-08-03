@@ -5,33 +5,65 @@ import org.deeplearning4j.nn.api.Layer;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.gradient.DefaultGradient;
 import org.deeplearning4j.nn.gradient.Gradient;
+import org.deeplearning4j.nn.layers.BaseLayer;
 import org.deeplearning4j.nn.params.BatchNormalizationParamInitializer;
-import org.deeplearning4j.optimize.api.ConvexOptimizer;
 import org.deeplearning4j.optimize.api.IterationListener;
 import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.api.ops.impl.broadcast.BroadcastAddOp;
+import org.nd4j.linalg.api.ops.impl.broadcast.BroadcastDivOp;
+import org.nd4j.linalg.api.ops.impl.broadcast.BroadcastMulOp;
+import org.nd4j.linalg.api.ops.impl.broadcast.BroadcastSubOp;
 import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.ops.transforms.Transforms;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 
 /**
  * Batch normalization layer.
- * http://arxiv.org/pdf/1410.7455v8.pdf
+ * Rerences:
+ *  http://arxiv.org/pdf/1502.03167v3.pdf
+ *  http://arxiv.org/pdf/1410.7455v8.pdf
+ *  https://kratzert.github.io/2016/02/12/understanding-the-gradient-flow-through-the-batch-normalization-layer.html
  *
- * @author Adam Gibson
- */
-public class BatchNormalization implements Layer {
-    private INDArray std;
-    private NeuralNetConfiguration conf;
-    private int index = 0;
-    private List<IterationListener> listeners = new ArrayList<>();
-    private Map<String,INDArray> params = new LinkedHashMap<>();
-    private int[] shape;
-    private Gradient gradient;
-    private INDArray xHat;
+ * tried this approach but results did not match https://cthorey.github.io/backpropagation/
+ *
+ * ideal to apply this between linear and non-linear transformations in layers it follows
+ **/
+
+public class BatchNormalization extends BaseLayer<org.deeplearning4j.nn.conf.layers.BatchNormalization> {
+    protected static final Logger log = LoggerFactory.getLogger(BatchNormalization.class);
+
+    BatchNormalizationHelper helper = null;
+    protected int index = 0;
+    protected List<IterationListener> listeners = new ArrayList<>();
+    protected int[] shape;
+    protected INDArray mean;
+    protected INDArray var;
+    protected INDArray std;
+    protected INDArray xMu;
+    protected INDArray xHat;
+    protected TrainingMode trainingMode;
+    protected boolean setMeanVar = true;
 
     public BatchNormalization(NeuralNetConfiguration conf) {
-        this.conf = conf;
+        super(conf);
+        initializeHelper();
+    }
+
+    void initializeHelper() {
+        try {
+            helper = Class.forName("org.deeplearning4j.nn.layers.normalization.CudnnBatchNormalizationHelper")
+                    .asSubclass(BatchNormalizationHelper.class).newInstance();
+        } catch (Throwable t) {
+            if (!(t instanceof ClassNotFoundException)) {
+                log.warn("Could not load CudnnBatchNormalizationHelper", t);
+            }
+        }
     }
 
     @Override
@@ -46,16 +78,11 @@ public class BatchNormalization implements Layer {
 
     @Override
     public Type type() {
-        return Type.CONVOLUTIONAL;
+        return Type.NORMALIZATION;
     }
 
     @Override
     public Gradient error(INDArray input) {
-        return null;
-    }
-
-    @Override
-    public INDArray derivativeActivation(INDArray input) {
         return null;
     }
 
@@ -66,90 +93,96 @@ public class BatchNormalization implements Layer {
 
     @Override
     public Pair<Gradient, INDArray> backpropGradient(INDArray epsilon) {
-        epsilon = epsilon.reshape(shape);
-        int m = shape[0] * shape[2];
-        //  gbeta = gy.sum(axis=(0, 2), keepdims=True)
-        INDArray gBeta = epsilon.sum(0,2);
-        getParam(BatchNormalizationParamInitializer.GAMMA_GRADIENT).addi(gBeta);
-        // ggamma = (gy * self.x_hat).sum(axis=(0, 2), keepdims=True)
-        INDArray newGamma = epsilon.mul(xHat).sum(0,2);
-        getParam(BatchNormalizationParamInitializer.GAMMA_GRADIENT).addi(newGamma);
-        //  coeff = self.gamma / self.std
-        INDArray coefficients = getParam(BatchNormalizationParamInitializer.GAMMA).div(std);
-        gBeta.divi(m);
-        getParam(BatchNormalizationParamInitializer.GAMMA_GRADIENT).divi(m);
-        INDArray ret = coefficients.mul(epsilon.sub(xHat).muli(getParam(BatchNormalizationParamInitializer.GAMMA_GRADIENT)).subi(gBeta));
-        ret = ret.reshape(shape);
-        Gradient g = new DefaultGradient();
-        g.setGradientFor(BatchNormalizationParamInitializer.GAMMA_GRADIENT,getParam(BatchNormalizationParamInitializer.GAMMA_GRADIENT));
-        g.setGradientFor(BatchNormalizationParamInitializer.BETA_GRADIENT,getParam(BatchNormalizationParamInitializer.BETA_GRADIENT));
-        this.gradient = g;
-        return new Pair<>(g,ret);
+        INDArray nextEpsilon;
+        shape = getShape(epsilon);
+        int batchSize = epsilon.size(0); // number examples in batch
+        org.deeplearning4j.nn.conf.layers.BatchNormalization layerConf = layerConf();
+
+        INDArray gamma = (layerConf.isLockGammaBeta())? Nd4j.ones(shape) : getParam(BatchNormalizationParamInitializer.GAMMA);
+        Gradient retGradient = new DefaultGradient();
+
+        INDArray dGammaView = gradientViews.get(BatchNormalizationParamInitializer.GAMMA);
+        INDArray dBetaView = gradientViews.get(BatchNormalizationParamInitializer.BETA);
+
+        if (helper != null) {
+            Pair<Gradient, INDArray> ret = helper.backpropGradient(input, epsilon,
+                    shape, gamma, dGammaView, dBetaView, layerConf.getEps());
+            if (ret != null) {
+                return ret;
+            }
+        }
+
+        // paper and long calculation
+        if (epsilon.rank() == 2) {
+            INDArray dGamma = epsilon.mul(xHat).sum(0);
+            INDArray dBeta = epsilon.sum(0); // sum over examples in batch
+            INDArray dxhat = epsilon.mulRowVector(gamma);
+            INDArray dsq = dxhat.mul(xMu).sum(0).mul(0.5).div(Transforms.pow(std, 3)).neg().div(batchSize);
+
+            INDArray dxmu1 = dxhat.divRowVector(std);
+            INDArray dxmu2 = xMu.mul(2).mulRowVector(dsq);
+
+            INDArray dx1 = dxmu1.add(dxmu2);
+            INDArray dmu = dx1.sum(0).neg();
+            INDArray dx2 = dmu.div(batchSize);
+            nextEpsilon = Nd4j.getExecutioner().execAndReturn(new BroadcastAddOp(dx1, dx2, dx1.dup(), -1));
+
+            //alternative short calculation - does not match but more normalized epsilon
+            INDArray r = xMu.divRowVector(Transforms.pow(std, 2)).mulRowVector(epsilon.mul(xMu).sum(0));
+            INDArray otherEp = epsilon.mul(2).subRowVector(dBeta).mulRowVector(gamma.div(std.mul(2))).sub(r);
+
+//            retGradient.setGradientFor(BatchNormalizationParamInitializer.GAMMA, dGamma);
+//            retGradient.setGradientFor(BatchNormalizationParamInitializer.BETA, dBeta);
+
+            //TODO rework this to avoid the assign here
+            dGammaView.assign(dGamma);
+            dBetaView.assign(dBeta);
+            retGradient.setGradientFor(BatchNormalizationParamInitializer.GAMMA, dGammaView);
+            retGradient.setGradientFor(BatchNormalizationParamInitializer.BETA, dBetaView);
+
+        } else if (epsilon.rank() == 4){
+            INDArray dGamma = epsilon.mul(xHat).sum(0,2,3);
+            INDArray dBeta = epsilon.sum(0,2,3); // sum over examples in batch
+            INDArray dxhat = Nd4j.getExecutioner().execAndReturn(new BroadcastMulOp(epsilon, gamma, epsilon.dup(), 1));
+
+            INDArray dsq = dxhat.mul(xMu).sum(0).mul(0.5).div(Transforms.pow(std, 3)).neg().div(batchSize);
+
+            INDArray dxmu1 = Nd4j.getExecutioner().execAndReturn(new BroadcastDivOp(dxhat, std, dxhat, new int[]{1,2,3}));
+            INDArray dxmu2 = Nd4j.getExecutioner().execAndReturn(new BroadcastMulOp(xMu.mul(2), dsq, xMu.mul(2), new int[]{1,2,3}));
+
+            INDArray dx1 = dxmu1.add(dxmu2);
+            INDArray dmu = dx1.sum(0).neg();
+            INDArray dx2 = dmu.div(batchSize);
+            nextEpsilon = Nd4j.getExecutioner().execAndReturn(new BroadcastAddOp(dx1, dx2, dx1.dup(), new int[]{1,2,3}));
+//            retGradient.setGradientFor(BatchNormalizationParamInitializer.GAMMA, dGamma);
+//            retGradient.setGradientFor(BatchNormalizationParamInitializer.BETA, dBeta);
+
+            //TODO rework this to avoid the assign here
+            dGammaView.assign(dGamma);
+            dBetaView.assign(dBeta);
+            retGradient.setGradientFor(BatchNormalizationParamInitializer.GAMMA, dGammaView);
+            retGradient.setGradientFor(BatchNormalizationParamInitializer.BETA, dBetaView);
+
+        } else {
+            // TODO setup BatchNorm for RNN http://arxiv.org/pdf/1510.01378v1.pdf
+            throw new IllegalStateException("The layer prior to BatchNorm in the configuration is not currently supported.");
+        }
+
+        return new Pair<>(retGradient,nextEpsilon);
     }
 
     @Override
     public void merge(Layer layer, int batchSize) {
-
-    }
-
-    @Override
-    public INDArray activationMean() {
-        return null;
-    }
-
-    @Override
-    public void update(Gradient gradient) {
-
-    }
-
-    @Override
-    public void fit() {
-
-    }
-
-    @Override
-    public void update(INDArray gradient, String paramType) {
-
-    }
-
-    @Override
-    public double score() {
-        return 0;
-    }
-
-    @Override
-    public void computeGradientAndScore() {
-
-    }
-
-    @Override
-    public void accumulateScore(double accum) {
-
-    }
-
-    @Override
-    public INDArray params() {
-        return Nd4j.create(0);
-    }
-
-    @Override
-    public int numParams() {
-        return 0;
-    }
-
-    @Override
-    public void setParams(INDArray params) {
-
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public void fit(INDArray data) {
-
     }
 
     @Override
-    public void iterate(INDArray input) {
-
+    public INDArray activate(boolean training) {
+        return preOutput(input, training == true? TrainingMode.TRAIN: TrainingMode.TEST);
     }
 
     @Override
@@ -158,114 +191,96 @@ public class BatchNormalization implements Layer {
     }
 
     @Override
-    public Pair<Gradient, Double> gradientAndScore() {
-        return new Pair<>(gradient(),score());
-    }
-
-    @Override
-    public int batchSize() {
-        return 0;
-    }
-
-    @Override
-    public NeuralNetConfiguration conf() {
-        return conf;
-    }
-
-    @Override
-    public void setConf(NeuralNetConfiguration conf) {
-        this.conf = conf;
-    }
-
-    @Override
-    public INDArray input() {
-        return null;
-    }
-
-    @Override
-    public void validateInput() {
-
-    }
-
-    @Override
-    public ConvexOptimizer getOptimizer() {
-        return null;
-    }
-
-    @Override
-    public INDArray getParam(String param) {
-        return params.get(param);
-    }
-
-    @Override
-    public void initParams() {
-
-    }
-
-    @Override
-    public Map<String, INDArray> paramTable() {
-        return params;
-    }
-
-    @Override
-    public void setParamTable(Map<String, INDArray> paramTable) {
-        this.params = paramTable;
-    }
-
-    @Override
-    public void setParam(String key, INDArray val) {
-        params.put(key,val);
-    }
-
-    @Override
-    public void clear() {
-
-    }
-
-    @Override
     public INDArray preOutput(INDArray x) {
         return preOutput(x,TrainingMode.TRAIN);
     }
 
-    @Override
-    public INDArray preOutput(INDArray x, TrainingMode training) {
-        int[] activationShape = getShape(x);
-        org.deeplearning4j.nn.conf.layers.BatchNormalization layerConf = (org.deeplearning4j.nn.conf.layers.BatchNormalization) conf().getLayer();
-        //cache the shape
-        this.shape = activationShape;
-        INDArray mean,var;
-        if(training != TrainingMode.TEST && !layerConf.isUseBatchMean()) {
-            mean = x.mean(0, 2);
-            var = x.var(0, 2);
+    public INDArray preOutput(INDArray x, TrainingMode training){
+        INDArray gamma, beta;
+        INDArray activations = null;
+        trainingMode = training;
+        // TODO add this directly in layer or get the layer prior...
+        // batchnorm true but need to clarify if activation before or after
+
+        org.deeplearning4j.nn.conf.layers.BatchNormalization layerConf = layerConf();
+        int batchSize = x.size(0); // number examples in batch
+        shape = getShape(x);
+
+
+        // xHat = x-xmean / sqrt(var + epsilon)
+        INDArray mean, var;
+        if (trainingMode == TrainingMode.TRAIN && layerConf.isUseBatchMean()) {
+            // mean and var over samples in batch
+            mean = x.mean(0);
+            var = x.var(false, 0);
             var.addi(layerConf.getEps());
+        } else {
+            // cumulative mean and var - primarily used after training
+            mean = this.mean;
+            var = this.var;
         }
-        else {
-            mean = getParam(BatchNormalizationParamInitializer.AVG_MEAN);
-            var = getParam(BatchNormalizationParamInitializer.AVG_VAR);
-        }
-
         std = Transforms.sqrt(var);
-        INDArray xMu = x.sub(mean);
-        xHat = xMu.div(std);
-        INDArray out = getParam(BatchNormalizationParamInitializer.GAMMA).add(xHat).addi(getParam(BatchNormalizationParamInitializer.BETA));
-        double decay = 0.0;
-        if(training != TrainingMode.TEST && !layerConf.isUseBatchMean()) {
-            if(layerConf.isFinetune()) {
-                layerConf.setN(layerConf.getN() + 1);
-                decay =  1. / layerConf.getN();
-            }
-            else
-                decay = layerConf.getDecay();
-            int m  = activationShape[0] * activationShape[2];
-            double  adjust = m / Math.max(m - 1., 1.);
-            getParam(BatchNormalizationParamInitializer.AVG_MEAN).muli(decay);
-            getParam(BatchNormalizationParamInitializer.AVG_MEAN).addi(mean.mul((1 - decay)));
-            getParam(BatchNormalizationParamInitializer.AVG_VAR).muli(decay);
-            getParam(BatchNormalizationParamInitializer.AVG_VAR).addi(var.mul((1 - decay) * adjust));
 
+        if (layerConf.isLockGammaBeta()) {
+            gamma = Nd4j.ones(shape);
+            beta = Nd4j.zeros(shape);
+        } else {
+            gamma = getParam(BatchNormalizationParamInitializer.GAMMA);
+            beta = getParam(BatchNormalizationParamInitializer.BETA);
         }
 
-        return out.reshape(x.shape());
+        if (helper != null) {
+            double decay = setMeanVar ? 1 : layerConf.getDecay();
+            if (setMeanVar){
+                this.mean = this.mean == null? Nd4j.zeros(mean.shape()): this.mean;
+                this.var = this.var == null? Nd4j.valueArrayOf(var.shape(), layerConf.getEps()): this.var;
+                setMeanVar = false;
+            }
+            INDArray ret = helper.preOutput(x, training == TrainingMode.TRAIN && layerConf.isUseBatchMean(),
+                    shape, gamma, beta, this.mean, this.var, decay, layerConf.getEps());
+            if (ret != null) {
+                return ret;
+            }
+        }
+
+        // BN(xk) = gamma*xˆ + β (applying gamma and beta for each activation)
+        if (x.rank() == 2) {
+            xMu = Nd4j.getExecutioner().execAndReturn(new BroadcastSubOp(x, mean, x.dup(), -1));
+            xHat = Nd4j.getExecutioner().execAndReturn(new BroadcastDivOp(xMu, std, xMu.dup(), -1));
+
+            activations = xHat.dup().mulRowVector(gamma).addRowVector(beta);
+        } else if (x.rank() == 4) {
+            xMu = Nd4j.getExecutioner().execAndReturn(new BroadcastSubOp(x, mean, x.dup(), new int[]{1,2,3}));
+            xHat = Nd4j.getExecutioner().execAndReturn(new BroadcastDivOp(xMu, std, xMu.dup(), new int[]{1,2,3}));
+
+            activations = Nd4j.getExecutioner().execAndReturn(new BroadcastMulOp(xHat,gamma,xHat.dup(),1));
+            activations = Nd4j.getExecutioner().execAndReturn(new BroadcastAddOp(activations,beta,activations,1));
+        } else {
+            // TODO setup BatchNorm for RNN http://arxiv.org/pdf/1510.01378v1.pdf
+            throw new IllegalStateException("The layer prior to BatchNorm in the configuration is not currently supported.");
+        }
+
+        // store mean and var if using batch mean while training
+        double decay;
+        if(training == TrainingMode.TRAIN && layerConf.isUseBatchMean()) {
+            // TODO track finetune phase here to update decay for finetune
+//          layerConf.setN(layerConf.getN() + 1);
+//          decay =  1. / layerConf.getN();
+
+            if (setMeanVar){
+                this.mean = this.mean == null? Nd4j.zeros(mean.shape()): this.mean;
+                this.var = this.var == null? Nd4j.valueArrayOf(var.shape(), layerConf.getEps()): this.var;
+                setMeanVar = false;
+            }
+
+            decay = layerConf.getDecay();
+            double adjust = batchSize / Math.max(batchSize - 1., 1.);
+
+            this.mean = mean.mul(decay).add(this.mean.mul(1 - decay));
+            this.var = var.mul(decay).add(this.var.mul((1 - decay) * adjust));
+        }
+
+        return activations;
     }
 
     @Override
@@ -281,28 +296,6 @@ public class BatchNormalization implements Layer {
     @Override
     public INDArray preOutput(INDArray x, boolean training) {
         return preOutput(x,training ? TrainingMode.TRAIN : TrainingMode.TEST);
-    }
-
-    @Override
-    public INDArray activate(boolean training) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public INDArray activate(INDArray input, boolean training) {
-        return preOutput(input,training);
-    }
-
-    @Override
-    public INDArray activate() {
-        throw new UnsupportedOperationException();
-
-    }
-
-    @Override
-    public INDArray activate(INDArray input) {
-        throw new UnsupportedOperationException();
-
     }
 
     @Override
@@ -328,11 +321,6 @@ public class BatchNormalization implements Layer {
     }
 
     @Override
-    public void setListeners(Collection<IterationListener> listeners) {
-        this.listeners = new ArrayList<>(listeners);
-    }
-
-    @Override
     public void setIndex(int index) {
         this.index = index;
     }
@@ -342,29 +330,17 @@ public class BatchNormalization implements Layer {
         return index;
     }
 
-    @Override
-    public void setInput(INDArray input) {
-
-    }
-
-    @Override
-    public void setInputMiniBatchSize(int size) {
-
-    }
-
-    @Override
-    public int getInputMiniBatchSize() {
-        return 0;
-    }
-
     public int[] getShape(INDArray x) {
-        int leadDim = x.size(0);
-        int cDim = getParam(BatchNormalizationParamInitializer.GAMMA).length();
-        int rdim = (int) ((double) x.length() / ((double) leadDim * (double) cDim));
-        if(leadDim * cDim * rdim != x.length())
-            throw new IllegalArgumentException("Illegal input for batch size");
-        return new int[] {leadDim,cDim,rdim};
-
+        if(x.rank() == 2 || x.rank() == 4)
+            return new int[] {1, x.size(1)};
+        if(x.rank() == 3) {
+            int wDim = x.size(1);
+            int hdim = x.size(2);
+            if(x.size(0) > 1 && wDim * hdim == x.length())
+                throw new IllegalArgumentException("Illegal input for batch size");
+            return new int[] {1, wDim * hdim};
+        }
+        else throw new IllegalStateException("Unable to process input of rank " + x.rank());
     }
 
 }

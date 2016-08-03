@@ -32,9 +32,7 @@ import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.api.rng.Random;
 import org.nd4j.linalg.factory.Nd4j;
 
-import static org.nd4j.linalg.ops.transforms.Transforms.sigmoid;
-import static org.nd4j.linalg.ops.transforms.Transforms.sqrt;
-import static org.nd4j.linalg.ops.transforms.Transforms.max;
+import static org.nd4j.linalg.ops.transforms.Transforms.*;
 
 
 /**
@@ -161,7 +159,7 @@ public  class RBM extends BasePretrainNetwork<org.deeplearning4j.nn.conf.layers.
 		 * Update gradient parameters
 		 */
         INDArray wGradient = input().transposei().mmul(probHidden.getSecond()).subi(
-                nvSamples.transposei().mmul(nhMeans)
+                nvSamples.transpose().mmul(nhMeans)
         );
 
 
@@ -177,7 +175,7 @@ public  class RBM extends BasePretrainNetwork<org.deeplearning4j.nn.conf.layers.
 
         //update rule: the expected values of the input - the negative samples adjusted by the learning rate
         INDArray  delta = input.sub(nvSamples);
-        INDArray  vBiasGradient =delta.sum(0);
+        INDArray  vBiasGradient = delta.sum(0);
 
         Gradient ret = new DefaultGradient();
         ret.gradientForVariable().put(PretrainParamInitializer.VISIBLE_BIAS_KEY,vBiasGradient);
@@ -200,6 +198,15 @@ public  class RBM extends BasePretrainNetwork<org.deeplearning4j.nn.conf.layers.
             h = layerConf().getHiddenUnit();
         if(v == null)
             v = layerConf().getVisibleUnit();
+
+        r.layerConf().setHiddenUnit(h);
+        r.layerConf().setVisibleUnit(v);
+
+        //biases:
+        INDArray vb = getParam(DefaultParamInitializer.BIAS_KEY).dup();
+        INDArray b = getParam(PretrainParamInitializer.VISIBLE_BIAS_KEY).dup();
+        r.setParam(PretrainParamInitializer.VISIBLE_BIAS_KEY,vb);
+        r.setParam(DefaultParamInitializer.BIAS_KEY,b);
 
         r.sigma = sigma;
         r.hiddenSigma = hiddenSigma;
@@ -235,7 +242,7 @@ public  class RBM extends BasePretrainNetwork<org.deeplearning4j.nn.conf.layers.
                 break;
             }
             case SOFTMAX: {
-                h1Sample = Nd4j.getExecutioner().execAndReturn(Nd4j.getOpFactory().createTransform("softmax", h1Mean), 0);
+                h1Sample = Nd4j.getExecutioner().execAndReturn(Nd4j.getOpFactory().createTransform("softmax", h1Mean));
                 break;
             }
             case BINARY: {
@@ -285,7 +292,7 @@ public  class RBM extends BasePretrainNetwork<org.deeplearning4j.nn.conf.layers.
                 break;
             }
             case SOFTMAX: {
-                v1Sample = Nd4j.getExecutioner().execAndReturn(Nd4j.getOpFactory().createTransform("softmax", v1Mean), 0);
+                v1Sample = Nd4j.getExecutioner().execAndReturn(Nd4j.getOpFactory().createTransform("softmax", v1Mean));
                 break;
             }
             case BINARY: {
@@ -307,14 +314,10 @@ public  class RBM extends BasePretrainNetwork<org.deeplearning4j.nn.conf.layers.
      * @param v the visible layer
      * @return the approximated activations of the visible layer
      */
-    public INDArray propUp(INDArray v,boolean training) {
+    public INDArray propUp(INDArray v, boolean training) {
         INDArray W = getParam(PretrainParamInitializer.WEIGHT_KEY);
-        if(training) {
-            if(conf.isUseDropConnect() && training) {
-                if (conf.getLayer().getDropOut() > 0 && training) {
-                    W = Dropout.applyDropConnect(this,DefaultParamInitializer.WEIGHT_KEY);
-                }
-            }
+        if(training && conf.isUseDropConnect() && conf.getLayer().getDropOut() > 0) {
+            W = Dropout.applyDropConnect(this,DefaultParamInitializer.WEIGHT_KEY);
         }
         INDArray hBias = getParam(PretrainParamInitializer.BIAS_KEY);
 
@@ -333,7 +336,7 @@ public  class RBM extends BasePretrainNetwork<org.deeplearning4j.nn.conf.layers.
             case BINARY:
                 return sigmoid(preSig);
             case SOFTMAX:
-                return Nd4j.getExecutioner().execAndReturn(Nd4j.getOpFactory().createTransform("softmax", preSig), 0);
+                return Nd4j.getExecutioner().execAndReturn(Nd4j.getOpFactory().createTransform("softmax", preSig));
             default:
                 throw new IllegalStateException("Hidden unit type should either be binary, gaussian, or rectified linear");
         }
@@ -373,7 +376,7 @@ public  class RBM extends BasePretrainNetwork<org.deeplearning4j.nn.conf.layers.
             case BINARY:
                 return sigmoid(vMean);
             case SOFTMAX:
-                return Nd4j.getExecutioner().execAndReturn(Nd4j.getOpFactory().createTransform("softmax", vMean), 0);
+                return Nd4j.getExecutioner().execAndReturn(Nd4j.getOpFactory().createTransform("softmax", vMean));
             default:
                 throw new IllegalStateException("Visible unit type should either be binary or gaussian");
         }
@@ -390,10 +393,10 @@ public  class RBM extends BasePretrainNetwork<org.deeplearning4j.nn.conf.layers.
     @Override
     public INDArray activate(boolean training) {
         if(training && conf.getLayer().getDropOut() > 0.0) {
-            input = Dropout.applyDropout(input,conf.getLayer().getDropOut(),dropoutMask);
+            Dropout.applyDropout(input,conf.getLayer().getDropOut());
         }
         //reconstructed: propUp ----> hidden propDown to transform
-        INDArray propUp = propUp(input,training);
+        INDArray propUp = propUp(input, training);
         return propUp;
     }
 
@@ -418,11 +421,7 @@ public  class RBM extends BasePretrainNetwork<org.deeplearning4j.nn.conf.layers.
             this.sigma = input.var(0).divi(input.rows());
 
         this.input = input.dup();
-        applyDropOutIfNecessary(this.input,true);
+        applyDropOutIfNecessary(true);
         contrastiveDivergence();
     }
-
-
-
-
 }

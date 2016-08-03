@@ -18,11 +18,18 @@
 
 package org.deeplearning4j.text.tokenization.tokenizer.preprocessor;
 
+import java.util.regex.Pattern;
+
 /**
  * Various string cleaning utils
  * @author Adam GIbson
  */
 public class StringCleaning {
+
+    private static final Pattern punctPattern = Pattern.compile("[\\d\\.:,\"\'\\(\\)\\[\\]|/?!;]+");
+
+    private StringCleaning() {
+    }
 
     /**
      * Strip punctuation
@@ -30,9 +37,6 @@ public class StringCleaning {
      * @return the cleaned string
      */
     public static String stripPunct(String base) {
-        return base.replaceAll("[\\d\\.:,\"\'\\(\\)\\[\\]|/?!;]+","");
-
+        return punctPattern.matcher(base).replaceAll("");
     }
-
-
 }

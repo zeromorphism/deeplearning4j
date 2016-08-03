@@ -18,10 +18,13 @@
 
 package org.deeplearning4j.models.embeddings;
 
-import org.deeplearning4j.models.word2vec.VocabWord;
+import org.deeplearning4j.models.sequencevectors.sequence.SequenceElement;
+import org.deeplearning4j.models.word2vec.wordstore.VocabCache;
 import org.deeplearning4j.plot.Tsne;
+import org.deeplearning4j.ui.UiConnectionInfo;
 import org.nd4j.linalg.api.ndarray.INDArray;
 
+import java.io.File;
 import java.io.Serializable;
 import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicLong;
@@ -31,14 +34,37 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * @author Adam Gibson
  */
-public interface WeightLookupTable extends Serializable {
+public interface WeightLookupTable<T extends SequenceElement> extends Serializable {
 
+    /**
+     * Returns unique ID of this table.
+     * Used for JointStorage/DistributedLookupTable mechanics
+     *
+     * @return ID of this table
+     */
+    Long getTableId();
+
+    /**
+     * Set's table Id.
+     * Please note, it should be unique withing Joint/Distributed LookupTable
+     *
+     * @param tableId
+     */
+    void setTableId(Long tableId);
 
     /**
      * The layer size for the lookup table
      * @return the layer size for the lookup table
      */
     int layerSize();
+
+    /**
+     * Returns gradient for specified word
+     * @param column
+     * @param gradient
+     * @return
+     */
+    double getGradient(int column, double gradient);
 
     /**
      * Clear out all weights regardless
@@ -50,12 +76,23 @@ public interface WeightLookupTable extends Serializable {
      * Render the words via TSNE
      * @param tsne the tsne to use
      */
-    void plotVocab(Tsne tsne);
+    void plotVocab(Tsne tsne, int numWords, UiConnectionInfo connectionInfo);
+
+    /**
+     * Render the words via TSNE
+     * @param tsne the tsne to use
+     */
+    void plotVocab(Tsne tsne, int numWords, File file);
 
     /**
      * Render the words via tsne
      */
-    void plotVocab();
+    void plotVocab(int numWords, UiConnectionInfo connectionInfo);
+
+    /**
+     * Render the words via tsne
+     */
+    void plotVocab(int numWords, File file);
 
     /**
      *
@@ -76,7 +113,8 @@ public interface WeightLookupTable extends Serializable {
      * @param w1 the first word to iterate on
      * @param w2 the second word to iterate on
      */
-    void iterate(VocabWord w1,VocabWord w2);
+    @Deprecated
+    void iterate(T w1,T w2);
     /**
      * Iterate on the given 2 vocab words
      * @param w1 the first word to iterate on
@@ -84,7 +122,8 @@ public interface WeightLookupTable extends Serializable {
      * @param nextRandom nextRandom for sampling
      * @param alpha the alpha to use for learning
      */
-    void iterateSample(VocabWord w1,VocabWord w2,AtomicLong nextRandom,double alpha);
+    @Deprecated
+    void iterateSample(T w1,T w2,AtomicLong nextRandom,double alpha);
 
 
     /**
@@ -121,5 +160,8 @@ public interface WeightLookupTable extends Serializable {
 
     INDArray getWeights();
 
-
+    /**
+     * Returns corresponding vocabulary
+     */
+    VocabCache<T> getVocabCache();
 }

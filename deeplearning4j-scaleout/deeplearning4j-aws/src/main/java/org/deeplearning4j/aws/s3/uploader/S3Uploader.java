@@ -18,16 +18,16 @@
 
 package org.deeplearning4j.aws.s3.uploader;
 
-import java.io.File;
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
-
-import com.amazonaws.services.s3.model.*;
-import org.deeplearning4j.aws.s3.BaseS3;
-
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
+import com.amazonaws.services.s3.model.*;
+import com.amazonaws.services.s3.transfer.MultipleFileUpload;
+import com.amazonaws.services.s3.transfer.TransferManager;
+import org.deeplearning4j.aws.s3.BaseS3;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Uploads files to S3
@@ -148,32 +148,35 @@ public class S3Uploader extends BaseS3 {
 		return formatted;
 	}
 	
-	public void upload(InputStream is,String name,String bucketName) {
+	public void upload(File file,String name,String bucketName) {
 		AmazonS3 client = getClient();
 		bucketName = ensureValidBucketName(bucketName);
 		List<Bucket> buckets = client.listBuckets();
-		ObjectMetadata med = new ObjectMetadata();
-		for(Bucket b : buckets) 
+	//	ObjectMetadata med = new ObjectMetadata();
+//		med.setContentLength(fileLength);
+		for(Bucket b : buckets)
 			if(b.getName().equals(bucketName)) {
-				client.putObject(bucketName, name, is, med);
+				//client.putObject(bucketName, name, is, med);
+				client.putObject(new PutObjectRequest(bucketName, name, file));
 				return;
 			}
 		
 		//bucket didn't exist: createComplex it
 		client.createBucket(bucketName);
-		client.putObject(bucketName, name, is, med);
-
-		
+		//client.putObject(bucketName, name, is, med);
+		client.putObject(new PutObjectRequest(bucketName, name, file));
 	}
 	
-	
-	
 
-	
+	public MultipleFileUpload uploadFolder(String bucketName, String keyPrefix,  File folderPath, boolean includeSubDir) {
+		TransferManager transfer = new TransferManager(getClient());
+		return transfer.uploadDirectory(bucketName, keyPrefix, folderPath, includeSubDir);
+	}
 
-	
-	
-	
-	
+	public MultipleFileUpload uploadFileList(String bucketName, File folderPath, List<File> fileList, String keyPrefix){
+		TransferManager transfer = new TransferManager(getClient());
+		return transfer.uploadFileList(bucketName, keyPrefix, folderPath, fileList);
+	}
+
 
 }

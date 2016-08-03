@@ -18,16 +18,18 @@
 
 package org.deeplearning4j.text.documentiterator;
 
-import java.io.*;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.LineIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
+import java.util.Iterator;
 
 /**
  * Iterate over files
@@ -84,9 +86,9 @@ public class FileDocumentIterator implements DocumentIterator {
 
             }
 
-            if(lineIterator.hasNext())
-
+            if(lineIterator != null && lineIterator.hasNext()) {
                 return new BufferedInputStream(IOUtils.toInputStream(lineIterator.nextLine()));
+            }
         } catch (Exception e) {
            log.warn("Error reading input stream...this is just a warning..Going to return",e);
             return null;

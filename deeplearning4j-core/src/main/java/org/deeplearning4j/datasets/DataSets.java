@@ -18,14 +18,16 @@
 
 package org.deeplearning4j.datasets;
 
-import java.io.IOException;
-
 import org.deeplearning4j.datasets.fetchers.IrisDataFetcher;
-import org.deeplearning4j.datasets.fetchers.LFWDataFetcher;
 import org.deeplearning4j.datasets.fetchers.MnistDataFetcher;
 import org.nd4j.linalg.dataset.DataSet;
 
+import java.io.IOException;
+
 public class DataSets {
+
+	private DataSets() {
+	}
 
 	public static DataSet mnist() {
 		return mnist(60000);
@@ -40,18 +42,7 @@ public class DataSets {
 			throw new RuntimeException(e);
 		}
 	}
-	
 
-	public static DataSet lfw() {
-		return lfw(LFWDataFetcher.NUM_IMAGES);
-	}
-	
-	
-	public static DataSet lfw(int num) {
-		LFWDataFetcher fetcher = new LFWDataFetcher();
-		fetcher.fetch(num);
-		return fetcher.next();
-	}
 	
 	public static DataSet iris() {
 		return iris(150);
